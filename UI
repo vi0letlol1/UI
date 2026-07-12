@@ -1816,7 +1816,7 @@
             return setmetatable(cfg, library)
         end  
 
-        -- Set Risky = true (or risky = true) to add a red [RISKY] label and red active pill.
+        -- Set Risky = true (or risky = true) to make the toggle text and active pill red.
         function library:toggle(options)
             options = options or {}
 
@@ -1867,7 +1867,7 @@
                     FontFace = fonts.small;
                     TextColor3 = cfg.risky and cfg.risky_color or rgb(245, 245, 245);
                     BorderColor3 = rgb(0, 0, 0);
-                    Text = cfg.name .. (cfg.risky and "  [RISKY]" or "");
+                    Text = cfg.name;
                     Parent = items[ "toggle" ];
                     Name = "\0";
                     Size = dim2(1, -130, 0, toggle_height);
@@ -2025,7 +2025,16 @@
             cfg.set(cfg.default)
             config_flags[cfg.flag] = cfg.set
 
-            return setmetatable(cfg, library)
+            local result = setmetatable(cfg, library)
+            local inline_keybind = options.keybind or options.Keybind
+            if inline_keybind ~= nil then
+                local keybind_options = type(inline_keybind) == "table"
+                    and inline_keybind
+                    or {default = inline_keybind}
+                result:keybind(keybind_options)
+            end
+
+            return result
         end
 
         function library:slider(options) 
@@ -3347,339 +3356,435 @@
             return setmetatable(cfg, library)
         end
 
-        function library:keybind(options) 
+        -- Keybinds can be created as standalone rows or attached directly to toggles.
+        -- Examples:
+        -- toggle:keybind({flag = "fly_key", default = "F"})
+        -- section:keybind({name = "Menu Bind", flag = "menu_bind", key = Enum.KeyCode.Insert})
+        function library:keybind(options)
+            options = options or {}
+
+            local attached_toggle = self.items
+                and self.items["right_components"]
+                and self.items["toggle_button"]
+                and type(self.set) == "function"
+
+            local raw_default = options.default
+            local initial_key = options.key
+            local initial_active = options.active
+
+            if initial_key == nil and (type(raw_default) == "string" or typeof(raw_default) == "EnumItem") then
+                initial_key = raw_default
+            end
+
+            if initial_active == nil then
+                initial_active = type(raw_default) == "boolean" and raw_default or false
+            end
+
+            local function resolve_key(value)
+                if typeof(value) == "EnumItem" then
+                    return value
+                end
+
+                if type(value) ~= "string" or value == "" or value == "NONE" then
+                    return "NONE"
+                end
+
+                local cleaned = value
+                    :gsub("^Enum%.KeyCode%.", "")
+                    :gsub("^Enum%.UserInputType%.", "")
+
+                return Enum.KeyCode[cleaned]
+                    or Enum.UserInputType[cleaned]
+                    or "NONE"
+            end
+
+            local function display_key(value)
+                if value == nil or value == "NONE" then
+                    return "NONE"
+                end
+
+                if typeof(value) == "EnumItem" then
+                    return keys[value] or value.Name
+                end
+
+                return tostring(value)
+                    :gsub("Enum%.KeyCode%.", "")
+                    :gsub("Enum%.UserInputType%.", "")
+            end
+
             local cfg = {
                 flag = options.flag or library:next_flag(),
                 callback = options.callback or function() end,
-                name = options.name or nil, 
-                ignore_key = options.ignore or false, 
-
-                key = options.key or nil, 
+                name = options.name or "Keybind",
+                ignore_key = options.ignore or false,
+                key = resolve_key(initial_key),
                 mode = options.mode or "Toggle",
-                active = options.default or false, 
-
+                active = initial_active == true,
                 open = false,
-                binding = nil, 
-
+                binding = nil,
+                attached_toggle = attached_toggle and self or nil,
                 hold_instances = {},
-                items = {};
+                items = {},
             }
+
+            if not table.find({"Toggle", "Hold", "Always"}, cfg.mode) then
+                cfg.mode = "Toggle"
+            end
 
             flags[cfg.flag] = {
                 mode = cfg.mode,
-                key = cfg.key, 
-                active = cfg.active
+                key = cfg.key,
+                active = cfg.active,
             }
 
-            local items = cfg.items; do 
-                -- Component
-                    items[ "keybind_element" ] = library:create( "TextButton" , {
-                        FontFace = fonts.font;
-                        TextColor3 = rgb(0, 0, 0);
-                        BorderColor3 = rgb(0, 0, 0);
-                        Text = "";
-                        Parent = self.items[ "elements" ];
-                        Name = "\0";
-                        BackgroundTransparency = 1;
-                        Size = dim2(1, 0, 0, 0);
-                        BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.Y;
-                        TextSize = 14;
-                        BackgroundColor3 = rgb(255, 255, 255)
-                    });
-                    
-                    items[ "name" ] = library:create( "TextLabel" , {
-                        FontFace = fonts.font;
-                        TextColor3 = rgb(245, 245, 245);
-                        BorderColor3 = rgb(0, 0, 0);
-                        Text = cfg.name;
-                        Parent = items[ "keybind_element" ];
-                        Name = "\0";
-                        Size = dim2(1, 0, 0, 0);
-                        BackgroundTransparency = 1;
-                        TextXAlignment = Enum.TextXAlignment.Left;
-                        BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.XY;
-                        TextSize = 16;
-                        BackgroundColor3 = rgb(255, 255, 255)
-                    });
-                    
-                    library:create( "UIPadding" , {
-                        Parent = items[ "name" ];
-                        PaddingRight = dim(0, 5);
-                        PaddingLeft = dim(0, 5)
-                    });
-                    
-                    items[ "right_components" ] = library:create( "Frame" , {
-                        Parent = items[ "keybind_element" ];
-                        Name = "\0";
-                        Position = dim2(1, 0, 0, 0);
-                        BorderColor3 = rgb(0, 0, 0);
-                        Size = dim2(0, 0, 1, 0);
-                        BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(255, 255, 255)
-                    });
-                    
-                    library:create( "UIListLayout" , {
-                        FillDirection = Enum.FillDirection.Horizontal;
-                        HorizontalAlignment = Enum.HorizontalAlignment.Right;
-                        Parent = items[ "right_components" ];
-                        Padding = dim(0, 7);
-                        SortOrder = Enum.SortOrder.LayoutOrder
-                    });
-                    
-                    items[ "keybind_holder" ] = library:create( "TextButton" , {
-                        FontFace = fonts.font;
-                        TextColor3 = rgb(0, 0, 0);
-                        BorderColor3 = rgb(0, 0, 0);
-                        Text = "";
-                        Parent = items[ "right_components" ];
-                        AutoButtonColor = false;
-                        AnchorPoint = vec2(1, 0);
-                        Size = dim2(0, 0, 0, 16);
-                        Name = "\0";
-                        Position = dim2(1, 0, 0, 0);
-                        BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.X;
-                        TextSize = 14;
-                        BackgroundColor3 = rgb(33, 33, 35)
-                    });
-                    
-                    library:create( "UICorner" , {
-                        Parent = items[ "keybind_holder" ];
-                        CornerRadius = dim(0, 4)
-                    });
-                    
-                    items[ "key" ] = library:create( "TextLabel" , {
-                        FontFace = fonts.font;
-                        TextColor3 = rgb(86, 86, 87);
-                        BorderColor3 = rgb(0, 0, 0);
-                        Text = "LSHIFT";
-                        Parent = items[ "keybind_holder" ];
-                        Name = "\0";
-                        Size = dim2(1, -12, 0, 0);
-                        BackgroundTransparency = 1;
-                        TextXAlignment = Enum.TextXAlignment.Left;
-                        BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.XY;
-                        TextSize = 14;
-                        BackgroundColor3 = rgb(255, 255, 255)
-                    });
-                    
-                    library:create( "UIPadding" , {
-                        Parent = items[ "key" ];
-                        PaddingTop = dim(0, 1);
-                        PaddingRight = dim(0, 5);
-                        PaddingLeft = dim(0, 5)
-                    });                                  
-                -- 
-                
-                -- Mode Holder
-                    items[ "dropdown" ] = library:create( "Frame" , {
-                        BorderColor3 = rgb(0, 0, 0);
-                        Parent = library.items;
-                        Name = "\0";
-                        BackgroundTransparency = 1;
-                        Position = dim2(0, 0, 0, 0);
-                        Size = dim2(0, 0, 0, 0);
-                        BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.X;
-                        BackgroundColor3 = rgb(0, 0, 0)
-                    });
-                    
-                    items[ "inline" ] = library:create( "Frame" , {
-                        Parent = items[ "dropdown" ];
-                        Size = dim2(1, 0, 1, 0);
-                        Name = "\0";
-                        ClipsDescendants = true;
-                        BorderColor3 = rgb(0, 0, 0);
-                        BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(22, 22, 24)
-                    });
-                    
-                    library:create( "UIPadding" , {
-                        PaddingBottom = dim(0, 6);
-                        PaddingTop = dim(0, 3);
-                        PaddingLeft = dim(0, 3);
-                        Parent = items[ "inline" ]
-                    });
-                    
-                    library:create( "UIListLayout" , {
-                        Parent = items[ "inline" ];
-                        Padding = dim(0, 5);
-                        SortOrder = Enum.SortOrder.LayoutOrder
-                    });
-                    
-                    library:create( "UICorner" , {
-                        Parent = items[ "inline" ];
-                        CornerRadius = dim(0, 4)
-                    });
-                    
-                    local options = {"Hold", "Toggle", "Always"}
-                    
-                    cfg.y_size = 20
-                    for _, option in options do                        
-                        local name = library:create( "TextButton" , {
-                            FontFace = fonts.font;
-                            TextColor3 = rgb(72, 72, 73);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Text = option;
-                            Parent = items[ "inline" ];
-                            Name = "\0";
-                            Size = dim2(0, 0, 0, 0);
-                            BackgroundTransparency = 1;
-                            TextXAlignment = Enum.TextXAlignment.Left;
-                            BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.XY;
-                            TextSize = 14;
-                            BackgroundColor3 = rgb(255, 255, 255)
-                        }); cfg.hold_instances[option] = name
-                        library:apply_theme(name, "accent", "TextColor3")
-                        
-                        cfg.y_size += name.AbsoluteSize.Y
+            local items = cfg.items
+            local component_parent
 
-                        library:create( "UIPadding" , {
-                            Parent = name;
-                            PaddingTop = dim(0, 1);
-                            PaddingRight = dim(0, 5);
-                            PaddingLeft = dim(0, 5)
-                        });
+            if attached_toggle then
+                component_parent = self.items["right_components"]
+            else
+                items["keybind_element"] = library:create("TextButton", {
+                    FontFace = fonts.font;
+                    TextColor3 = rgb(0, 0, 0);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Text = "";
+                    Parent = self.items["elements"];
+                    Name = "\0";
+                    BackgroundTransparency = 1;
+                    Size = dim2(1, 0, 0, mobile_value(18, 24));
+                    BorderSizePixel = 0;
+                    AutoButtonColor = false;
+                    TextSize = 14;
+                    BackgroundColor3 = rgb(255, 255, 255);
+                })
 
-                        name.Activated:Connect(function()
-                            cfg.set(option)
+                items["name"] = library:create("TextLabel", {
+                    FontFace = fonts.font;
+                    TextColor3 = rgb(245, 245, 245);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Text = cfg.name;
+                    Parent = items["keybind_element"];
+                    Name = "\0";
+                    Size = dim2(1, -90, 1, 0);
+                    BackgroundTransparency = 1;
+                    TextXAlignment = Enum.TextXAlignment.Left;
+                    BorderSizePixel = 0;
+                    TextSize = 16;
+                    BackgroundColor3 = rgb(255, 255, 255);
+                })
 
-                            cfg.set_visible(false)
+                library:create("UIPadding", {
+                    Parent = items["name"];
+                    PaddingRight = dim(0, 5);
+                    PaddingLeft = dim(0, 5);
+                })
 
-                            cfg.open = false
-                        end)
-                    end
-                -- 
-            end 
-            
-            function cfg.modify_mode_color(path) -- ts so frikin tuff 💀
-                for _, v in cfg.hold_instances do 
-                    v.TextColor3 = rgb(72, 72, 72)
-                end 
+                items["right_components"] = library:create("Frame", {
+                    Parent = items["keybind_element"];
+                    Name = "\0";
+                    AnchorPoint = vec2(1, 0);
+                    Position = dim2(1, 0, 0, 0);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Size = dim2(0, 0, 1, 0);
+                    AutomaticSize = Enum.AutomaticSize.X;
+                    BorderSizePixel = 0;
+                    BackgroundTransparency = 1;
+                    BackgroundColor3 = rgb(255, 255, 255);
+                })
 
-                cfg.hold_instances[path].TextColor3 = themes.preset.accent
+                library:create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal;
+                    HorizontalAlignment = Enum.HorizontalAlignment.Right;
+                    VerticalAlignment = Enum.VerticalAlignment.Center;
+                    Parent = items["right_components"];
+                    Padding = dim(0, 7);
+                    SortOrder = Enum.SortOrder.LayoutOrder;
+                })
+
+                component_parent = items["right_components"]
             end
 
-            function cfg.set_mode(mode) 
-                cfg.mode = mode 
+            items["keybind_holder"] = library:create("TextButton", {
+                FontFace = fonts.font;
+                TextColor3 = rgb(86, 86, 87);
+                BorderColor3 = rgb(0, 0, 0);
+                Text = "";
+                Parent = component_parent;
+                AutoButtonColor = false;
+                Name = "\0";
+                LayoutOrder = 40;
+                Size = dim2(0, mobile_value(46, 58), 0, mobile_value(18, 22));
+                BorderSizePixel = 0;
+                TextSize = 14;
+                BackgroundColor3 = rgb(33, 33, 35);
+            })
 
-                if mode == "Always" then
-                    cfg.set(true)
-                elseif mode == "Hold" then
-                    cfg.set(false)
+            library:create("UICorner", {
+                Parent = items["keybind_holder"];
+                CornerRadius = dim(0, 4);
+            })
+
+            items["key"] = library:create("TextLabel", {
+                FontFace = fonts.font;
+                TextColor3 = rgb(120, 120, 123);
+                BorderColor3 = rgb(0, 0, 0);
+                Text = display_key(cfg.key);
+                Parent = items["keybind_holder"];
+                Name = "\0";
+                Size = dim2(1, -8, 1, 0);
+                Position = dim2(0, 4, 0, 0);
+                BackgroundTransparency = 1;
+                TextXAlignment = Enum.TextXAlignment.Center;
+                TextTruncate = Enum.TextTruncate.AtEnd;
+                BorderSizePixel = 0;
+                TextSize = 13;
+                BackgroundColor3 = rgb(255, 255, 255);
+            })
+
+            items["dropdown"] = library:create("Frame", {
+                BorderColor3 = rgb(0, 0, 0);
+                Parent = library.items;
+                Name = "\0";
+                Visible = false;
+                Position = dim2(0, 0, 0, 0);
+                Size = dim2(0, 92, 0, 0);
+                BorderSizePixel = 0;
+                ClipsDescendants = true;
+                BackgroundColor3 = rgb(22, 22, 24);
+                ZIndex = 500;
+            })
+
+            library:create("UICorner", {
+                Parent = items["dropdown"];
+                CornerRadius = dim(0, 4);
+            })
+
+            local dropdown_layout = library:create("UIListLayout", {
+                Parent = items["dropdown"];
+                Padding = dim(0, 2);
+                SortOrder = Enum.SortOrder.LayoutOrder;
+            })
+
+            library:create("UIPadding", {
+                Parent = items["dropdown"];
+                PaddingTop = dim(0, 4);
+                PaddingBottom = dim(0, 4);
+                PaddingLeft = dim(0, 4);
+                PaddingRight = dim(0, 4);
+            })
+
+            local mode_options = {"Toggle", "Hold", "Always"}
+            for index, mode_name in ipairs(mode_options) do
+                local mode_button = library:create("TextButton", {
+                    FontFace = fonts.font;
+                    TextColor3 = mode_name == cfg.mode and themes.preset.accent or rgb(100, 100, 103);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Text = mode_name;
+                    Parent = items["dropdown"];
+                    Name = "\0";
+                    LayoutOrder = index;
+                    Size = dim2(1, 0, 0, 20);
+                    BackgroundTransparency = 1;
+                    TextXAlignment = Enum.TextXAlignment.Left;
+                    BorderSizePixel = 0;
+                    TextSize = 13;
+                    ZIndex = 501;
+                    BackgroundColor3 = rgb(255, 255, 255);
+                })
+
+                cfg.hold_instances[mode_name] = mode_button
+                library:apply_theme(mode_button, "accent", "TextColor3")
+
+                mode_button.Activated:Connect(function()
+                    cfg.set_mode(mode_name)
+                    cfg.set_visible(false)
+                end)
+            end
+
+            local function update_mode_colors()
+                for mode_name, instance in pairs(cfg.hold_instances) do
+                    instance.TextColor3 = mode_name == cfg.mode and themes.preset.accent or rgb(100, 100, 103)
                 end
+            end
 
-                flags[cfg.flag]["mode"] = mode
-                cfg.modify_mode_color(mode)
-            end 
-
-            function cfg.set(input)
-                if type(input) == "boolean" then 
-                    cfg.active = input
-
-                    if cfg.mode == "Always" then 
-                        cfg.active = true
-                    end
-                elseif tostring(input):find("Enum") then 
-                    input = input.Name == "Escape" and "NONE" or input
-                    
-                    cfg.key = input or "NONE"	
-                elseif find({"Toggle", "Hold", "Always"}, input) then 
-                    if input == "Always" then 
-                        cfg.active = true 
-                    end 
-
-                    cfg.mode = input
-                    cfg.set_mode(cfg.mode) 
-                elseif type(input) == "table" then 
-                    input.key = type(input.key) == "string" and input.key ~= "NONE" and library:convert_enum(input.key) or input.key
-                    input.key = input.key == Enum.KeyCode.Escape and "NONE" or input.key
-
-                    cfg.key = input.key or "NONE"
-                    cfg.mode = input.mode or "Toggle"
-
-                    if input.active then
-                        cfg.active = input.active
-                    end
-
-                    cfg.set_mode(cfg.mode) 
-                end 
-
-                cfg.callback(cfg.active)
-
-                local text = tostring(cfg.key) ~= "Enums" and (keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")) or nil
-                local __text = text and (tostring(text):gsub("KeyCode.", ""):gsub("UserInputType.", ""))
-                
-                items[ "key" ].Text = __text
-
+            local function update_flag()
                 flags[cfg.flag] = {
                     mode = cfg.mode,
-                    key = cfg.key, 
-                    active = cfg.active
+                    key = cfg.key,
+                    active = cfg.active,
                 }
             end
 
-            function cfg.set_visible(bool)
-                local size = bool and cfg.y_size or 0
-                library:tween(items[ "dropdown" ], {Size = dim_offset(items[ "keybind_holder" ].AbsoluteSize.X, size)})
+            local function apply_active(active, run_callback)
+                active = active == true
+                if cfg.mode == "Always" then
+                    active = true
+                end
 
-                items[ "dropdown" ].Position = dim_offset(items[ "keybind_holder" ].AbsolutePosition.X, items[ "keybind_holder" ].AbsolutePosition.Y + items[ "keybind_holder" ].AbsoluteSize.Y + 60)
+                cfg.active = active
+
+                if cfg.attached_toggle then
+                    cfg.attached_toggle.set(active)
+                end
+
+                if run_callback ~= false then
+                    cfg.callback(active)
+                end
+
+                update_flag()
             end
-        
-            items[ "keybind_holder" ].Activated:Connect(function()
-                task.wait()
-                items[ "key" ].Text = "..."	
 
-                cfg.binding = library:connection(uis.InputBegan, function(keycode, game_event)  
-                    cfg.set(keycode.KeyCode ~= Enum.KeyCode.Unknown and keycode.KeyCode or keycode.UserInputType)
-                    
-                    cfg.binding:Disconnect() 
+            function cfg.set_mode(mode)
+                if not table.find(mode_options, mode) then
+                    return
+                end
+
+                cfg.mode = mode
+                update_mode_colors()
+
+                if mode == "Always" then
+                    apply_active(true)
+                elseif mode == "Hold" then
+                    apply_active(false)
+                else
+                    update_flag()
+                end
+            end
+
+            function cfg.set(input)
+                if type(input) == "boolean" then
+                    apply_active(input)
+                    return
+                end
+
+                if typeof(input) == "EnumItem" or type(input) == "string" then
+                    local possible_mode = type(input) == "string" and table.find(mode_options, input)
+                    if possible_mode then
+                        cfg.set_mode(input)
+                    else
+                        cfg.key = resolve_key(input)
+                        items["key"].Text = display_key(cfg.key)
+                        update_flag()
+                    end
+                    return
+                end
+
+                if type(input) == "table" then
+                    if input.key ~= nil then
+                        cfg.key = resolve_key(input.key)
+                    end
+                    if input.mode ~= nil and table.find(mode_options, input.mode) then
+                        cfg.mode = input.mode
+                    end
+                    if input.active ~= nil then
+                        cfg.active = input.active == true
+                    end
+
+                    items["key"].Text = display_key(cfg.key)
+                    update_mode_colors()
+                    apply_active(cfg.active, false)
+                end
+            end
+
+            function cfg.set_visible(visible)
+                cfg.open = visible == true
+                items["dropdown"].Visible = cfg.open
+
+                if not cfg.open then
+                    items["dropdown"].Size = dim2(0, 92, 0, 0)
+                    return
+                end
+
+                local viewport = camera.ViewportSize
+                local width = 92
+                local height = 70
+                local x = math.clamp(items["keybind_holder"].AbsolutePosition.X, 4, math.max(4, viewport.X - width - 4))
+                local y = items["keybind_holder"].AbsolutePosition.Y + items["keybind_holder"].AbsoluteSize.Y + 4
+
+                if y + height > viewport.Y - 4 then
+                    y = items["keybind_holder"].AbsolutePosition.Y - height - 4
+                end
+
+                items["dropdown"].Position = dim2(0, x, 0, math.max(4, y))
+                items["dropdown"].Size = dim2(0, width, 0, height)
+            end
+
+            local function begin_binding()
+                if cfg.binding then
+                    cfg.binding:Disconnect()
+                    cfg.binding = nil
+                end
+
+                items["key"].Text = "..."
+                cfg.binding = library:connection(uis.InputBegan, function(input, processed)
+                    if input.UserInputType == Enum.UserInputType.Touch then
+                        return
+                    end
+
+                    local selected_key = input.UserInputType == Enum.UserInputType.Keyboard
+                        and input.KeyCode
+                        or input.UserInputType
+
+                    cfg.key = selected_key == Enum.KeyCode.Escape and "NONE" or selected_key
+                    items["key"].Text = display_key(cfg.key)
+                    update_flag()
+
+                    cfg.binding:Disconnect()
                     cfg.binding = nil
                 end)
+            end
+
+            items["keybind_holder"].Activated:Connect(begin_binding)
+            items["keybind_holder"].MouseButton2Click:Connect(function()
+                cfg.set_visible(not cfg.open)
             end)
 
-            items[ "keybind_holder" ].MouseButton2Down:Connect(function()
-                cfg.open = not cfg.open 
-
-                cfg.set_visible(cfg.open)
-            end)
-
-            library:connection(uis.InputBegan, function(input, game_event) 
-                if not game_event then
-                    local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-
-                    if selected_key == cfg.key then 
-                        if cfg.mode == "Toggle" then 
-                            cfg.active = not cfg.active
-                            cfg.set(cfg.active)
-                        elseif cfg.mode == "Hold" then 
-                            cfg.set(true)
-                        end
-                    end
+            library:connection(uis.InputBegan, function(input, processed)
+                if processed or cfg.binding then
+                    return
                 end
-            end)    
 
-            library:connection(uis.InputEnded, function(input, game_event) 
-                if game_event then 
-                    return 
-                end 
+                local selected_key = input.UserInputType == Enum.UserInputType.Keyboard
+                    and input.KeyCode
+                    or input.UserInputType
 
-                local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-    
+                if selected_key ~= cfg.key then
+                    return
+                end
+
+                if cfg.mode == "Toggle" then
+                    local current = cfg.attached_toggle and cfg.attached_toggle.enabled or cfg.active
+                    apply_active(not current)
+                elseif cfg.mode == "Hold" then
+                    apply_active(true)
+                elseif cfg.mode == "Always" then
+                    apply_active(true)
+                end
+            end)
+
+            library:connection(uis.InputEnded, function(input, processed)
+                if processed or cfg.mode ~= "Hold" then
+                    return
+                end
+
+                local selected_key = input.UserInputType == Enum.UserInputType.Keyboard
+                    and input.KeyCode
+                    or input.UserInputType
+
                 if selected_key == cfg.key then
-                    if cfg.mode == "Hold" then 
-                        cfg.set(false)
-                    end
+                    apply_active(false)
                 end
             end)
-            
-            cfg.set({mode = cfg.mode, active = cfg.active, key = cfg.key})           
-            config_flags[cfg.flag] = cfg.set
 
+            items["key"].Text = display_key(cfg.key)
+            update_mode_colors()
+            if cfg.mode == "Always" then
+                apply_active(true, false)
+            else
+                update_flag()
+            end
+
+            config_flags[cfg.flag] = cfg.set
             return setmetatable(cfg, library)
         end
 
