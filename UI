@@ -82,17 +82,19 @@
     local themes = {
         preset = {
             accent = rgb(155, 150, 219),
-        }, 
+            title_gradient = rgb(115, 205, 255),
+        },
 
         utility = {
             accent = {
-                BackgroundColor3 = {}, 	
-                TextColor3 = {}, 
-                ImageColor3 = {}, 
+                BackgroundColor3 = {},
+                TextColor3 = {},
+                ImageColor3 = {},
                 ScrollBarImageColor3 = {},
-                GradientColor = {}
             },
-        }
+        },
+
+        title_gradients = {},
     }
 
     local keys = {
@@ -427,33 +429,65 @@
             return floor(number * multiplier + 0.5) / multiplier
         end 
 
-        function library:apply_theme(instance, theme, property) 
-            insert(themes.utility[theme][property], instance)
+        function library:apply_theme(instance, theme, property)
+            local theme_data = themes.utility[theme]
+            if not theme_data or not theme_data[property] then
+                return
+            end
+
+            insert(theme_data[property], instance)
         end
 
-        local function make_title_gradient(accent_color)
+        local function make_title_gradient()
             return rgbseq({
-                rgbkey(0, accent_color),
-                rgbkey(0.55, accent_color:Lerp(rgb(115, 205, 255), 0.45)),
-                rgbkey(1, rgb(255, 255, 255)),
+                rgbkey(0, themes.preset.accent),
+                rgbkey(0.55, themes.preset.accent:Lerp(themes.preset.title_gradient, 0.5)),
+                rgbkey(1, themes.preset.title_gradient),
             })
         end
 
-        function library:update_theme(theme, new_color)
-            local old_color = themes.preset[theme]
+        local function register_title_gradient(gradient)
+            insert(themes.title_gradients, gradient)
+            gradient.Color = make_title_gradient()
+        end
 
-            for property_name, objects in themes.utility[theme] do
-                for _, object in objects do
-                    if property_name == "GradientColor" then
-                        object.Color = make_title_gradient(new_color)
-                    elseif object[property_name] == old_color then
-                        object[property_name] = new_color
+        local function refresh_title_gradients()
+            for index = #themes.title_gradients, 1, -1 do
+                local gradient = themes.title_gradients[index]
+                if gradient and gradient.Parent then
+                    gradient.Color = make_title_gradient()
+                else
+                    remove(themes.title_gradients, index)
+                end
+            end
+        end
+
+        function library:update_theme(theme, new_color)
+            if theme == "title_gradient" then
+                themes.preset.title_gradient = new_color
+                refresh_title_gradients()
+                return
+            end
+
+            local old_color = themes.preset[theme]
+            local theme_data = themes.utility[theme]
+
+            if theme_data then
+                for property_name, objects in theme_data do
+                    for index = #objects, 1, -1 do
+                        local object = objects[index]
+                        if not object or not object.Parent then
+                            remove(objects, index)
+                        elseif object[property_name] == old_color then
+                            object[property_name] = new_color
+                        end
                     end
                 end
             end
 
             themes.preset[theme] = new_color
-        end 
+            refresh_title_gradients()
+        end
 
         function library:connection(signal, callback)
             local connection = signal:Connect(callback)
@@ -620,9 +654,9 @@
 
                 items[ "title_gradient" ] = library:create( "UIGradient", {
                     Parent = items[ "title" ];
-                    Color = make_title_gradient(accent);
+                    Color = make_title_gradient();
                     Rotation = 0;
-                }); library:apply_theme(items[ "title_gradient" ], "accent", "GradientColor");
+                }); register_title_gradient(items[ "title_gradient" ]);
                 
                 items[ "multi_holder" ] = library:create( "Frame" , {
                     Parent = items[ "main" ];
@@ -1431,22 +1465,19 @@
             return setmetatable(cfg, library)
         end  
 
-        function library:toggle(options) 
-            local rand = math.random(1, 2) 
+        function library:toggle(options)
+            local default_value = options.default == true
             local cfg = {
-                enabled = options.enabled or nil,
+                enabled = default_value,
                 name = options.name or "Toggle",
                 info = options.info or nil,
                 flag = options.flag or library:next_flag(),
-                
-                type = options.type and string.lower(options.type) or rand == 1 and "toggle" or "checkbox"; -- "toggle", "checkbox"
-
-                default = options.default or false,
-                folding = options.folding or false, 
+                type = "toggle",
+                default = default_value,
+                folding = options.folding or false,
                 callback = options.callback or function() end,
-
-                items = {};
-                seperator = options.seperator or options.Seperator or false;
+                items = {},
+                seperator = options.seperator or options.Seperator or false,
             }
 
             flags[cfg.flag] = cfg.default
@@ -1466,7 +1497,7 @@
                     TextSize = 14;
                     BackgroundColor3 = rgb(255, 255, 255)
                 });
-                
+
                 items[ "name" ] = library:create( "TextLabel" , {
                     FontFace = fonts.small;
                     TextColor3 = rgb(245, 245, 245);
@@ -1474,16 +1505,15 @@
                     Text = cfg.name;
                     Parent = items[ "toggle" ];
                     Name = "\0";
-                    Size = dim2(1, 0, 0, 0);
+                    Size = dim2(1, -120, 0, 18);
                     BackgroundTransparency = 1;
                     TextXAlignment = Enum.TextXAlignment.Left;
                     BorderSizePixel = 0;
-                    AutomaticSize = Enum.AutomaticSize.XY;
                     TextSize = 16;
                     BackgroundColor3 = rgb(255, 255, 255)
                 });
 
-                if cfg.info then 
+                if cfg.info then
                     items[ "info" ] = library:create( "TextLabel" , {
                         FontFace = fonts.small;
                         TextColor3 = rgb(130, 130, 130);
@@ -1492,191 +1522,129 @@
                         Text = cfg.info;
                         Parent = items[ "toggle" ];
                         Name = "\0";
-                        Position = dim2(0, 5, 0, 17);
-                        Size = dim2(1, -10, 0, 0);
+                        Position = dim2(0, 5, 0, 20);
+                        Size = dim2(1, -60, 0, 0);
                         BackgroundTransparency = 1;
                         TextXAlignment = Enum.TextXAlignment.Left;
                         BorderSizePixel = 0;
-                        AutomaticSize = Enum.AutomaticSize.XY;
-                        TextSize = 16;
+                        AutomaticSize = Enum.AutomaticSize.Y;
+                        TextSize = 14;
                         BackgroundColor3 = rgb(255, 255, 255)
                     });
-                end 
-                
+                end
+
                 library:create( "UIPadding" , {
                     Parent = items[ "name" ];
                     PaddingRight = dim(0, 5);
                     PaddingLeft = dim(0, 5)
                 });
-                
+
                 items[ "right_components" ] = library:create( "Frame" , {
                     Parent = items[ "toggle" ];
                     Name = "\0";
+                    AnchorPoint = vec2(1, 0);
                     Position = dim2(1, 0, 0, 0);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(0, 0, 1, 0);
+                    Size = dim2(0, 0, 0, 18);
+                    AutomaticSize = Enum.AutomaticSize.X;
                     BorderSizePixel = 0;
+                    BackgroundTransparency = 1;
                     BackgroundColor3 = rgb(255, 255, 255)
                 });
-                
+
                 library:create( "UIListLayout" , {
                     FillDirection = Enum.FillDirection.Horizontal;
                     HorizontalAlignment = Enum.HorizontalAlignment.Right;
+                    VerticalAlignment = Enum.VerticalAlignment.Center;
                     Parent = items[ "right_components" ];
-                    Padding = dim(0, 9);
+                    Padding = dim(0, 7);
                     SortOrder = Enum.SortOrder.LayoutOrder
                 });
-                
-                -- Toggle
-                    if cfg.type == "checkbox" then 
-                        items[ "toggle_button" ] = library:create( "TextButton" , {
-                            FontFace = fonts.small;
-                            TextColor3 = rgb(0, 0, 0);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Text = "";
-                            LayoutOrder = 2;
-                            AutoButtonColor = false;
-                            AnchorPoint = vec2(1, 0);
-                            Parent = items[ "right_components" ];
-                            Name = "\0";
-                            Position = dim2(1, 0, 0, 0);
-                            Size = dim2(0, 16, 0, 16);
-                            BorderSizePixel = 0;
-                            TextSize = 14;
-                            BackgroundColor3 = rgb(67, 67, 68)
-                        }); library:apply_theme(items[ "toggle_button" ], "accent", "BackgroundColor3");
-                        
-                        library:create( "UICorner" , {
-                            Parent = items[ "toggle_button" ];
-                            CornerRadius = dim(0, 4)
-                        });
-                        
-                        items[ "outline" ] = library:create( "Frame" , {
-                            Parent = items[ "toggle_button" ];
-                            Size = dim2(1, -2, 1, -2);
-                            Name = "\0";
-                            BorderMode = Enum.BorderMode.Inset;
-                            BorderColor3 = rgb(0, 0, 0);
-                            Position = dim2(0, 1, 0, 1);
-                            BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(22, 22, 24)
-                        }); library:apply_theme(items[ "outline" ], "accent", "BackgroundColor3");
-                        
-                        items[ "tick" ] = library:create( "ImageLabel" , {
-                            ImageTransparency = 1;
-                            BorderColor3 = rgb(0, 0, 0);
-                            Image = "rbxassetid://111862698467575";
-                            BackgroundTransparency = 1;
-                            Position = dim2(0, -1, 0, 0);
-                            Parent = items[ "outline" ];
-                            Size = dim2(1, 2, 1, 2);
-                            BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(255, 255, 255);
-                            ZIndex = 1;
-                        });
 
-                        library:create( "UICorner" , {
-                            Parent = items[ "outline" ];
-                            CornerRadius = dim(0, 4)
-                        });
-                        
-                        library:create( "UIGradient" , {
-                            Enabled = false;
-                            Parent = items[ "outline" ];
-                            Color = rgbseq{rgbkey(0, rgb(211, 211, 211)), rgbkey(1, rgb(211, 211, 211))}
-                        });  
-                    else 
-                        items[ "toggle_button" ] = library:create( "TextButton" , {
-                            FontFace = fonts.font;
-                            TextColor3 = rgb(0, 0, 0);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Text = "";
-                            LayoutOrder = 2;
-                            AnchorPoint = vec2(1, 0.5);
-                            Parent = items[ "right_components" ];
-                            Name = "\0";
-                            Position = dim2(1, -9, 0.5, 0);
-                            Size = dim2(0, 36, 0, 18);
-                            BorderSizePixel = 0;
-                            TextSize = 14;
-                            BackgroundColor3 = themes.preset.accent
-                        }); library:apply_theme(items[ "toggle_button" ], "accent", "BackgroundColor3");
-                        
-                        library:create( "UICorner" , {
-                            Parent = items[ "toggle_button" ];
-                            CornerRadius = dim(0, 999)
-                        });
-                        
-                        items[ "inline" ] = library:create( "Frame" , {
-                            Parent = items[ "toggle_button" ];
-                            Size = dim2(1, -2, 1, -2);
-                            Name = "\0";
-                            BorderMode = Enum.BorderMode.Inset;
-                            BorderColor3 = rgb(0, 0, 0);
-                            Position = dim2(0, 1, 0, 1);
-                            BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset.accent
-                        }); library:apply_theme(items[ "inline" ], "accent", "BackgroundColor3");
-                        
-                        library:create( "UICorner" , {
-                            Parent = items[ "inline" ];
-                            CornerRadius = dim(0, 999)
-                        });
-                        
-                        library:create( "UIGradient" , {
-                            Color = rgbseq{rgbkey(0, rgb(211, 211, 211)), rgbkey(1, rgb(211, 211, 211))};
-                            Parent = items[ "inline" ]
-                        });
-                        
-                        items[ "circle" ] = library:create( "Frame" , {
-                            Parent = items[ "inline" ];
-                            Name = "\0";
-                            Position = dim2(1, -14, 0, 2);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(0, 12, 0, 12);
-                            BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(255, 255, 255)
-                        });
-                        
-                        library:create( "UICorner" , {
-                            Parent = items[ "circle" ];
-                            CornerRadius = dim(0, 999)
-                        });                        
-                    end 
-                --                
-            end;
-            
+                items[ "toggle_button" ] = library:create( "TextButton" , {
+                    FontFace = fonts.font;
+                    TextColor3 = rgb(0, 0, 0);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Text = "";
+                    LayoutOrder = 100;
+                    AutoButtonColor = false;
+                    Parent = items[ "right_components" ];
+                    Name = "\0";
+                    Size = dim2(0, 36, 0, 18);
+                    BorderSizePixel = 0;
+                    TextSize = 14;
+                    BackgroundColor3 = rgb(58, 58, 62)
+                }); library:apply_theme(items[ "toggle_button" ], "accent", "BackgroundColor3");
+
+                library:create( "UICorner" , {
+                    Parent = items[ "toggle_button" ];
+                    CornerRadius = dim(0, 999)
+                });
+
+                items[ "inline" ] = library:create( "Frame" , {
+                    Parent = items[ "toggle_button" ];
+                    Size = dim2(1, -2, 1, -2);
+                    Name = "\0";
+                    BorderMode = Enum.BorderMode.Inset;
+                    BorderColor3 = rgb(0, 0, 0);
+                    Position = dim2(0, 1, 0, 1);
+                    BorderSizePixel = 0;
+                    BackgroundColor3 = rgb(50, 50, 50)
+                }); library:apply_theme(items[ "inline" ], "accent", "BackgroundColor3");
+
+                library:create( "UICorner" , {
+                    Parent = items[ "inline" ];
+                    CornerRadius = dim(0, 999)
+                });
+
+                library:create( "UIGradient" , {
+                    Color = rgbseq{rgbkey(0, rgb(211, 211, 211)), rgbkey(1, rgb(211, 211, 211))};
+                    Parent = items[ "inline" ]
+                });
+
+                items[ "circle" ] = library:create( "Frame" , {
+                    Parent = items[ "inline" ];
+                    Name = "\0";
+                    Position = dim2(0, 2, 0, 2);
+                    BorderColor3 = rgb(0, 0, 0);
+                    Size = dim2(0, 12, 0, 12);
+                    BorderSizePixel = 0;
+                    BackgroundColor3 = rgb(86, 86, 88)
+                });
+
+                library:create( "UICorner" , {
+                    Parent = items[ "circle" ];
+                    CornerRadius = dim(0, 999)
+                });
+            end
+
             function cfg.set(bool)
-                if cfg.type == "checkbox" then 
-                    library:tween(items[ "tick" ], {Rotation = bool and 0 or 45, ImageTransparency = bool and 0 or 1})
-                    library:tween(items[ "toggle_button" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(67, 67, 68)})
-                    library:tween(items[ "outline" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(22, 22, 24)})
-                else
-                    library:tween(items[ "toggle_button" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(58, 58, 62)}, Enum.EasingStyle.Quad)
-                    library:tween(items[ "inline" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(50, 50, 50)}, Enum.EasingStyle.Quad)
-                    library:tween(items[ "circle" ], {BackgroundColor3 = bool and rgb(255, 255, 255) or rgb(86, 86, 88), Position = bool and dim2(1, -14, 0, 2) or dim2(0, 2, 0, 2)}, Enum.EasingStyle.Quad)
-                end
+                bool = bool == true
+                cfg.enabled = bool
+                flags[cfg.flag] = bool
+
+                library:tween(items[ "toggle_button" ], {
+                    BackgroundColor3 = bool and themes.preset.accent or rgb(58, 58, 62)
+                }, Enum.EasingStyle.Quad)
+                library:tween(items[ "inline" ], {
+                    BackgroundColor3 = bool and themes.preset.accent or rgb(50, 50, 50)
+                }, Enum.EasingStyle.Quad)
+                library:tween(items[ "circle" ], {
+                    BackgroundColor3 = bool and rgb(255, 255, 255) or rgb(86, 86, 88),
+                    Position = bool and dim2(1, -14, 0, 2) or dim2(0, 2, 0, 2)
+                }, Enum.EasingStyle.Quad)
 
                 cfg.callback(bool)
+            end
 
-                if cfg.folding then 
-                    elements.Visible = bool
-                end
+            local function toggle_state()
+                cfg.set(not cfg.enabled)
+            end
 
-                flags[cfg.flag] = bool
-            end 
-            
-            items[ "toggle" ].MouseButton1Click:Connect(function()
-                cfg.enabled = not cfg.enabled 
-                cfg.set(cfg.enabled)
-            end)
+            items[ "toggle" ].MouseButton1Click:Connect(toggle_state)
+            items[ "toggle_button" ].MouseButton1Click:Connect(toggle_state)
 
-            items[ "toggle_button" ].MouseButton1Click:Connect(function()
-                cfg.enabled = not cfg.enabled 
-                cfg.set(cfg.enabled)
-            end)
-            
-            if cfg.seperator then -- ok bro my lua either sucks or this was a pain in the ass to make (simple if statement aswell 💔)
+            if cfg.seperator then
                 library:create( "Frame" , {
                     AnchorPoint = vec2(0, 1);
                     Parent = self.items[ "elements" ];
@@ -1689,12 +1657,11 @@
             end
 
             cfg.set(cfg.default)
-
             config_flags[cfg.flag] = cfg.set
 
             return setmetatable(cfg, library)
-        end 
-        
+        end
+
         function library:slider(options) 
             local cfg = {
                 name = options.name or nil,
@@ -3423,11 +3390,6 @@
                     CornerRadius = dim(0, 7)
                 });
                 
-                library:create( "UICorner" , {
-                    Parent = items[ "fade" ];
-                    CornerRadius = dim(0, 7)
-                });
-                
                 items[ "tick" ] = library:create( "ImageButton" , {
                     Image = "rbxassetid://128797200442698";
                     Name = "\0";
@@ -3567,22 +3529,145 @@
             return setmetatable(cfg, library)
         end 
 
-        function library:init_config(window) 
-            window:seperator({name = "Settings"})
-            local main = window:tab({name = "Configs", tabs = {"Main"}})
-            
-            local column = main:column({})
-            local section = column:section({name = "Configs", size = 1, default = true, icon = "rbxassetid://139628202576511"})
-            config_holder = section:list({options = {"Report", "This", "Error", "To", "Finobe"}, callback = function(option) end, flag = "config_name_list"}); library:update_config_list()
-            
-            local column = main:column({})
-            local section = column:section({name = "Settings", side = "right", size = 1, default = true, icon = "rbxassetid://129380150574313"})
-            section:textbox({name = "Config name:", flag = "config_name_text"})
-            section:button({name = "Save", callback = function() writefile(library.directory .. "/configs/" .. flags["config_name_text"] or flags["config_name_list"] .. ".cfg", library:get_config()) library:update_config_list() notifications:create_notification({name = "Configs", info = "Saved config to:\n" .. flags["config_name_list"] or flags["config_name_text"]}) end}) 
-            section:button({name = "Load", callback = function() library:load_config(readfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg"))  library:update_config_list() notifications:create_notification({name = "Configs", info = "Loaded config:\n" .. flags["config_name_list"]}) end})
-            section:button({name = "Delete", callback = function() delfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg")  library:update_config_list() notifications:create_notification({name = "Configs", info = "Deleted config:\n" .. flags["config_name_list"]}) end})
-            section:colorpicker({name = "Menu Accent", callback = function(color, alpha) library:update_theme("accent", color) end, color = themes.preset.accent})
-            section:keybind({name = "Menu Bind", callback = function(bool) window.toggle_menu(bool) end, default = true})
+        function library:init_config(window)
+            local interface_page, configs_page = window:tab({
+                name = "Settings",
+                tabs = {"Interface", "Configs"}
+            })
+
+            local interface_column = interface_page:column({})
+            local appearance_section = interface_column:section({
+                name = "Appearance",
+                size = 1,
+                default = true,
+                icon = "rbxassetid://129380150574313"
+            })
+
+            appearance_section:colorpicker({
+                name = "UI Accent",
+                flag = "menu_accent",
+                color = themes.preset.accent,
+                callback = function(selected_color)
+                    library:update_theme("accent", selected_color)
+                end
+            })
+
+            appearance_section:colorpicker({
+                name = "Title Gradient",
+                flag = "menu_title_gradient",
+                color = themes.preset.title_gradient,
+                callback = function(selected_color)
+                    library:update_theme("title_gradient", selected_color)
+                end
+            })
+
+            appearance_section:keybind({
+                name = "Menu Bind",
+                flag = "menu_bind",
+                callback = function(bool)
+                    window.toggle_menu(bool)
+                end,
+                default = true
+            })
+
+            local config_list_column = configs_page:column({})
+            local config_list_section = config_list_column:section({
+                name = "Saved Configs",
+                size = 1,
+                default = true,
+                icon = "rbxassetid://139628202576511"
+            })
+
+            config_holder = config_list_section:list({
+                options = {},
+                callback = function() end,
+                flag = "config_name_list"
+            })
+            library:update_config_list()
+
+            local config_actions_column = configs_page:column({})
+            local config_actions_section = config_actions_column:section({
+                name = "Config Actions",
+                size = 1,
+                default = true,
+                icon = "rbxassetid://129380150574313"
+            })
+
+            config_actions_section:textbox({name = "Config name", flag = "config_name_text"})
+
+            local function selected_config_name()
+                local typed_name = flags["config_name_text"]
+                if type(typed_name) == "string" and typed_name ~= "" then
+                    return typed_name
+                end
+
+                local selected_name = flags["config_name_list"]
+                if type(selected_name) == "string" and selected_name ~= "" then
+                    return selected_name
+                end
+
+                return nil
+            end
+
+            config_actions_section:button({
+                name = "Save Config",
+                callback = function()
+                    local name = selected_config_name()
+                    if not name then
+                        notifications:create_notification({name = "Configs", info = "Enter or select a config name."})
+                        return
+                    end
+
+                    writefile(library.directory .. "/configs/" .. name .. ".cfg", library:get_config())
+                    library:update_config_list()
+                    notifications:create_notification({name = "Configs", info = "Saved config: " .. name})
+                end
+            })
+
+            config_actions_section:button({
+                name = "Load Config",
+                callback = function()
+                    local name = selected_config_name()
+                    if not name then
+                        notifications:create_notification({name = "Configs", info = "Select a config first."})
+                        return
+                    end
+
+                    local path = library.directory .. "/configs/" .. name .. ".cfg"
+                    if not isfile(path) then
+                        notifications:create_notification({name = "Configs", info = "Config not found: " .. name})
+                        return
+                    end
+
+                    library:load_config(readfile(path))
+                    notifications:create_notification({name = "Configs", info = "Loaded config: " .. name})
+                end
+            })
+
+            config_actions_section:button({
+                name = "Delete Config",
+                callback = function()
+                    local name = selected_config_name()
+                    if not name then
+                        notifications:create_notification({name = "Configs", info = "Select a config first."})
+                        return
+                    end
+
+                    local path = library.directory .. "/configs/" .. name .. ".cfg"
+                    if isfile(path) then
+                        delfile(path)
+                    end
+                    library:update_config_list()
+                    notifications:create_notification({name = "Configs", info = "Deleted config: " .. name})
+                end
+            })
+
+            config_actions_section:button({
+                name = "Refresh List",
+                callback = function()
+                    library:update_config_list()
+                end
+            })
         end
     --
 
