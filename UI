@@ -1,5 +1,5 @@
-	--//Thank You Finobe For This Beautiful UI
-    local Services = setmetatable({}, {
+--//Thank you Finobe For This Beautiful UI
+local Services = setmetatable({}, {
         __index = function(self, service_name)
             local service = game:GetService(service_name)
             rawset(self, service_name, service)
@@ -2026,11 +2026,36 @@
             config_flags[cfg.flag] = cfg.set
 
             local result = setmetatable(cfg, library)
-            local inline_keybind = options.keybind or options.Keybind
-            if inline_keybind ~= nil then
-                local keybind_options = type(inline_keybind) == "table"
-                    and inline_keybind
-                    or {default = inline_keybind}
+
+            -- Keybinds are opt-in. A toggle only receives a keybind when
+            -- Keybind/keybind is supplied here or toggle:keybind({...}) is
+            -- called by the loader after creation.
+            local inline_keybind = options.keybind
+            if inline_keybind == nil then
+                inline_keybind = options.Keybind
+            end
+
+            if inline_keybind ~= nil and inline_keybind ~= false then
+                local keybind_options
+
+                if type(inline_keybind) == "table" then
+                    keybind_options = inline_keybind
+                elseif inline_keybind ~= true then
+                    keybind_options = {default = inline_keybind}
+                else
+                    keybind_options = {}
+                end
+
+                if keybind_options.flag == nil then
+                    keybind_options.flag = tostring(cfg.flag) .. "_key"
+                end
+                if keybind_options.default == nil and keybind_options.key == nil then
+                    keybind_options.default = "NONE"
+                end
+                if keybind_options.mode == nil then
+                    keybind_options.mode = "Toggle"
+                end
+
                 result:keybind(keybind_options)
             end
 
@@ -3372,6 +3397,63 @@
             local initial_key = options.key
             local initial_active = options.active
 
+            -- Reconfigure the keybind already attached automatically to a
+            -- toggle instead of creating a second keybind box.
+            local existing = attached_toggle and rawget(self, "_keybind_control") or nil
+            if existing then
+                local old_flag = existing.flag
+
+                if options.flag ~= nil and options.flag ~= old_flag then
+                    flags[old_flag] = nil
+                    config_flags[old_flag] = nil
+                    existing.flag = options.flag
+                    config_flags[existing.flag] = existing.set
+                end
+
+                if options.callback ~= nil then
+                    existing.callback = options.callback
+                end
+                if options.ignore ~= nil then
+                    existing.ignore_key = options.ignore == true
+                end
+
+                local update = {}
+                local has_update = false
+
+                if initial_key ~= nil then
+                    update.key = initial_key
+                    has_update = true
+                elseif type(raw_default) == "string" or typeof(raw_default) == "EnumItem" then
+                    update.key = raw_default
+                    has_update = true
+                end
+
+                if options.mode ~= nil then
+                    update.mode = options.mode
+                    has_update = true
+                end
+
+                if initial_active ~= nil then
+                    update.active = initial_active == true
+                    has_update = true
+                elseif type(raw_default) == "boolean" then
+                    update.active = raw_default
+                    has_update = true
+                end
+
+                if has_update then
+                    existing.set(update)
+                else
+                    flags[existing.flag] = {
+                        mode = existing.mode,
+                        key = existing.key,
+                        active = existing.active,
+                    }
+                end
+
+                return existing
+            end
+
             if initial_key == nil and (type(raw_default) == "string" or typeof(raw_default) == "EnumItem") then
                 initial_key = raw_default
             end
@@ -3393,8 +3475,20 @@
                     :gsub("^Enum%.KeyCode%.", "")
                     :gsub("^Enum%.UserInputType%.", "")
 
-                return Enum.KeyCode[cleaned]
-                    or Enum.UserInputType[cleaned]
+                -- Roblox throws when an Enum is indexed with a name that does
+                -- not belong to it. MouseButton1/2/3 are UserInputType values,
+                -- not KeyCode values, so use protected lookups instead of
+                -- indexing Enum.KeyCode first and expecting `or` to continue.
+                local function safe_enum_lookup(enum_type, name)
+                    local ok, item = pcall(function()
+                        return enum_type[name]
+                    end)
+
+                    return ok and item or nil
+                end
+
+                return safe_enum_lookup(Enum.KeyCode, cleaned)
+                    or safe_enum_lookup(Enum.UserInputType, cleaned)
                     or "NONE"
             end
 
@@ -3513,7 +3607,7 @@
                 AutoButtonColor = false;
                 Name = "\0";
                 LayoutOrder = 40;
-                Size = dim2(0, mobile_value(46, 58), 0, mobile_value(18, 22));
+                Size = dim2(0, mobile_value(40, 46), 0, mobile_value(18, 22));
                 BorderSizePixel = 0;
                 TextSize = 14;
                 BackgroundColor3 = rgb(33, 33, 35);
@@ -3710,6 +3804,12 @@
             end
 
             local function begin_binding()
+                -- Touch-only devices cannot supply a keyboard key. Keep the
+                -- current bind instead of leaving the box stuck on "...".
+                if uis:GetLastInputType() == Enum.UserInputType.Touch and not uis.KeyboardEnabled then
+                    return
+                end
+
                 if cfg.binding then
                     cfg.binding:Disconnect()
                     cfg.binding = nil
@@ -3785,7 +3885,13 @@
             end
 
             config_flags[cfg.flag] = cfg.set
-            return setmetatable(cfg, library)
+
+            local result = setmetatable(cfg, library)
+            if attached_toggle then
+                self._keybind_control = result
+            end
+
+            return result
         end
 
         function library:button(options) 
