@@ -1,5 +1,5 @@
-	--// Thank you Finobe for this beautiful UI
-	local Services = setmetatable({}, {
+	--//Thank You Finobe For This Beautiful UI
+    local Services = setmetatable({}, {
         __index = function(self, service_name)
             local service = game:GetService(service_name)
             rawset(self, service_name, service)
@@ -76,6 +76,71 @@
         end
 
         return asset
+    end
+
+    local function settings_is_ancestor(candidate, panel)
+        local current = panel and panel.parent_settings
+
+        while current do
+            if current == candidate then
+                return true
+            end
+
+            current = current.parent_settings
+        end
+
+        return false
+    end
+
+    local function decimal_places(step)
+        step = math.abs(tonumber(step) or 1)
+
+        for places = 0, 6 do
+            local scaled = step * (10 ^ places)
+            if math.abs(scaled - math.floor(scaled + 0.5)) < 1e-7 then
+                return places
+            end
+        end
+
+        return 6
+    end
+
+    local function format_number(value, places)
+        if places <= 0 then
+            return tostring(math.floor(value + 0.5))
+        end
+
+        return string.format("%." .. tostring(places) .. "f", value)
+    end
+
+    local function clamped_popup_position(anchor, width, height, prefer_right)
+        local viewport = camera.ViewportSize
+        local margin = 8
+        local anchor_position = anchor.AbsolutePosition
+        local anchor_size = anchor.AbsoluteSize
+        local x
+
+        if prefer_right then
+            x = anchor_position.X + anchor_size.X + margin
+            if x + width > viewport.X - margin then
+                x = anchor_position.X - width - margin
+            end
+        else
+            x = anchor_position.X
+            if x + width > viewport.X - margin then
+                x = viewport.X - width - margin
+            end
+        end
+
+        local y = anchor_position.Y - margin
+        if y + height > viewport.Y - margin then
+            y = viewport.Y - height - margin
+        end
+
+        x = clamp(x, margin, math.max(margin, viewport.X - width - margin))
+        y = clamp(y, margin, math.max(margin, viewport.Y - height - margin))
+
+        return dim_offset(x, y)
     end
 -- 
 
@@ -404,6 +469,10 @@
             local Config = {}
             
             for _, v in next, flags do
+                if _ == "config_name_list" or _ == "config_name_text" or _ == "config_autoload_enabled" then
+                    continue
+                end
+
                 if type(v) == "table" and v.key then
                     Config[_] = {active = v.active, mode = v.mode, key = tostring(v.key)}
                 elseif type(v) == "table" and v["Transparency"] and v["Color"] then
@@ -422,8 +491,8 @@
             for _, v in config do 
                 local function_set = library.config_flags[_]
                 
-                if _ == "config_name_list" then 
-                    continue 
+                if _ == "config_name_list" or _ == "config_name_text" or _ == "config_autoload_enabled" then
+                    continue
                 end
 
                 if function_set then 
@@ -516,18 +585,38 @@
             return connection 
         end
 
-        function library:close_element(new_path) 
+        function library:close_element(new_path)
             local open_element = library.current_open
 
-            if open_element and new_path ~= open_element then
-                open_element.set_visible(false)
-                open_element.open = false;
-            end 
+            if not new_path then
+                while open_element do
+                    if open_element.set_visible then
+                        open_element.set_visible(false, true)
+                    end
+                    open_element.open = false
+                    open_element = open_element.parent_settings
+                end
 
-            if new_path ~= open_element then 
-                library.current_open = new_path or nil;
+                library.current_open = nil
+                return
             end
-        end 
+
+            if open_element and new_path ~= open_element then
+                local element_to_close = open_element
+
+                while element_to_close
+                    and element_to_close ~= new_path
+                    and not settings_is_ancestor(element_to_close, new_path) do
+                    if element_to_close.set_visible then
+                        element_to_close.set_visible(false, true)
+                    end
+                    element_to_close.open = false
+                    element_to_close = element_to_close.parent_settings
+                end
+            end
+
+            library.current_open = new_path
+        end
 
         function library:create(instance, options)
             local ins = Instance.new(instance) 
@@ -1573,6 +1662,7 @@
                 callback = options.callback or function() end,
                 items = {},
                 seperator = false,
+                settings_parent = self.__settings_panel or self.settings_parent,
             }
 
             flags[cfg.flag] = cfg.default
@@ -1768,15 +1858,17 @@
                 -- value settings
                 min = options.min or options.minimum or 0,
                 max = options.max or options.maximum or 100,
-                intervals = options.interval or options.decimal or 1,
+                intervals = options.interval or options.increment or options.decimal or 1,
                 default = options.default or 10,
-                value = options.default or 10, 
-                seperator = options.seperator or options.Seperator or true;
+                value = options.default or 10,
+                precision = 0,
+                seperator = options.seperator == nil and (options.Seperator == nil and true or options.Seperator) or options.seperator;
 
                 dragging = false,
                 items = {}
             } 
 
+            cfg.precision = decimal_places(cfg.intervals)
             flags[cfg.flag] = cfg.default
 
             local items = cfg.items; do
@@ -1939,7 +2031,7 @@
                 cfg.value = clamp(library:round(value, cfg.intervals), cfg.min, cfg.max)
 
                 library:tween(items[ "fill" ], {Size = dim2((cfg.value - cfg.min) / (cfg.max - cfg.min), cfg.value == cfg.min and 0 or -4, 0, 2)}, Enum.EasingStyle.Linear, 0.05)
-                items[ "value" ].Text = tostring(cfg.value) .. cfg.suffix
+                items[ "value" ].Text = format_number(cfg.value, cfg.precision) .. cfg.suffix
 
                 flags[cfg.flag] = cfg.value
                 cfg.callback(flags[cfg.flag])
@@ -2002,7 +2094,8 @@
                 ignore = options.ignore or false;
                 items = {};
                 y_size;
-                seperator = options.seperator or options.Seperator or true;
+                seperator = options.seperator == nil and (options.Seperator == nil and true or options.Seperator) or options.seperator;
+                parent_settings = self.__settings_panel or self.settings_parent;
             }   
 
             cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or "None"
@@ -2422,7 +2515,8 @@
                 callback = options.callback or function() end,
                 items = {};
 
-                seperator = options.seperator or options.Seperator or false;
+                seperator = options.seperator == nil and (options.Seperator == nil and false or options.Seperator) or options.seperator;
+                parent_settings = self.__settings_panel or self.settings_parent;
             }
 
             local dragging_sat = false 
@@ -3422,26 +3516,30 @@
             return setmetatable(cfg, library)
         end 
 
-        function library:settings(options)  
-            local cfg = {
-                open = false; 
-                items = {}; 
-                sanity = true; -- made this for my own sanity.
-            }
+        function library:settings(options)
+            options = options or {}
 
-            local items = cfg.items; do 
+            local cfg = {
+                open = false;
+                items = {};
+                sanity = true;
+                parent_settings = self.settings_parent;
+                max_height = options.max_height or 420;
+            }
+            cfg.__settings_panel = cfg
+
+            local items = cfg.items; do
                 items[ "outline" ] = library:create( "Frame" , {
                     Name = "\0";
-                    Visible = true;
+                    Visible = false;
                     Parent = library[ "items" ];
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(0, 0, 0, 0);
+                    Size = dim_offset(0, 0);
                     ClipsDescendants = true;
                     BorderSizePixel = 0;
-                    AutomaticSize = Enum.AutomaticSize.Y;
-                    BackgroundColor3 = rgb(25, 25, 29)
+                    BackgroundColor3 = rgb(25, 25, 29);
                 });
-                
+
                 items[ "inline" ] = library:create( "Frame" , {
                     Parent = items[ "outline" ];
                     Name = "\0";
@@ -3449,42 +3547,56 @@
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -2, 1, -2);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(22, 22, 24)
+                    BackgroundColor3 = rgb(22, 22, 24);
                 });
-                
+
                 library:create( "UICorner" , {
                     Parent = items[ "inline" ];
                     CornerRadius = dim(0, 7)
                 });
-                
+
+                items[ "scrolling" ] = library:create( "ScrollingFrame", {
+                    Parent = items[ "inline" ];
+                    Name = "\0";
+                    Position = dim_offset(0, 0);
+                    Size = dim2(1, 0, 1, 0);
+                    BackgroundTransparency = 1;
+                    BorderSizePixel = 0;
+                    Active = true;
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y;
+                    CanvasSize = dim_offset(0, 0);
+                    ScrollBarThickness = 2;
+                    ScrollBarImageColor3 = rgb(65, 65, 68);
+                });
+
                 items[ "elements" ] = library:create( "Frame" , {
                     BorderColor3 = rgb(0, 0, 0);
-                    Parent = items[ "inline" ];
+                    Parent = items[ "scrolling" ];
                     Name = "\0";
                     BackgroundTransparency = 1;
                     Position = dim2(0, 10, 0, 10);
                     Size = dim2(1, -20, 0, 0);
                     BorderSizePixel = 0;
                     AutomaticSize = Enum.AutomaticSize.Y;
-                    BackgroundColor3 = rgb(255, 255, 255)
+                    BackgroundColor3 = rgb(255, 255, 255);
                 });
-                
+
                 library:create( "UIListLayout" , {
                     Parent = items[ "elements" ];
                     Padding = dim(0, 10);
                     SortOrder = Enum.SortOrder.LayoutOrder
                 });
-                
+
                 library:create( "UIPadding" , {
                     PaddingBottom = dim(0, 15);
                     Parent = items[ "elements" ]
                 });
-                
+
                 library:create( "UICorner" , {
                     Parent = items[ "outline" ];
                     CornerRadius = dim(0, 7)
                 });
-                
+
                 items[ "tick" ] = library:create( "ImageButton" , {
                     Image = "rbxassetid://128797200442698";
                     Name = "\0";
@@ -3494,23 +3606,85 @@
                     Size = dim2(0, 16, 0, 16);
                     BorderSizePixel = 0;
                     BackgroundColor3 = rgb(255, 255, 255)
-                });                
-            end 
-
-            function cfg.set_visible(bool)                 
-                library:tween(items[ "outline" ], {Size = dim_offset(bool and 240 or 0, 0)})
-                items[ "outline" ].Position = dim_offset(items[ "tick" ].AbsolutePosition.X, items[ "tick" ].AbsolutePosition.Y + 90)
-                library:close_element(cfg)
+                });
             end
-            
-            items[ "tick" ].MouseButton1Click:Connect(function()
-                cfg.open = not cfg.open
 
-                cfg.set_visible(cfg.open)
+            local function update_popup_geometry(animate)
+                if not cfg.open then
+                    return
+                end
+
+                local viewport_height = camera.ViewportSize.Y
+                local width = 240
+                local content_height = math.max(items[ "elements" ].AbsoluteSize.Y + 20, 42)
+                local height = math.min(content_height, cfg.max_height, math.max(80, viewport_height - 16))
+                local target_size = dim_offset(width, height)
+                local target_position = clamped_popup_position(items[ "tick" ], width, height, true)
+
+                items[ "outline" ].Position = target_position
+                if animate then
+                    library:tween(items[ "outline" ], {Size = target_size}, Enum.EasingStyle.Quad, 0.2)
+                else
+                    items[ "outline" ].Size = target_size
+                end
+            end
+
+            function cfg.set_visible(bool, internal_close)
+                cfg.open = bool == true
+
+                if cfg.open then
+                    items[ "outline" ].Visible = true
+                    items[ "outline" ].Size = dim_offset(0, 0)
+                    task.defer(function()
+                        update_popup_geometry(true)
+                    end)
+
+                    if not internal_close then
+                        library:close_element(cfg)
+                    end
+                else
+                    local active_element = library.current_open
+                    if active_element and settings_is_ancestor(cfg, active_element) then
+                        while active_element and active_element ~= cfg do
+                            if active_element.set_visible then
+                                active_element.set_visible(false, true)
+                            end
+                            active_element.open = false
+                            active_element = active_element.parent_settings
+                        end
+                    end
+
+                    library:tween(items[ "outline" ], {Size = dim_offset(0, 0)}, Enum.EasingStyle.Quad, 0.15)
+                    task.delay(0.16, function()
+                        if not cfg.open and items[ "outline" ] and items[ "outline" ].Parent then
+                            items[ "outline" ].Visible = false
+                        end
+                    end)
+
+                    if library.current_open == cfg or settings_is_ancestor(cfg, library.current_open) then
+                        library.current_open = cfg.parent_settings
+                    end
+                end
+            end
+
+            library:connection(camera:GetPropertyChangedSignal("ViewportSize"), function()
+                update_popup_geometry(false)
+            end)
+
+            items[ "elements" ]:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                if cfg.open then
+                    task.defer(function()
+                        update_popup_geometry(false)
+                    end)
+                end
+            end)
+
+            items[ "tick" ].MouseButton1Click:Connect(function()
+                cfg.set_visible(not cfg.open)
             end)
 
             return setmetatable(cfg, library)
-        end 
+        end
 
         function library:list(properties) 
             local cfg = {
@@ -3625,6 +3799,9 @@
         end 
 
         function library:init_config(window)
+            local autoload_path = library.directory .. "/autoload.txt"
+            local initial_autoload_name = isfile(autoload_path) and readfile(autoload_path) or nil
+
             local interface_page, configs_page = window:tab({
                 name = "Settings",
                 icon = "rbxassetid://106205298246017",
@@ -3719,6 +3896,44 @@
                 return nil
             end
 
+            local autoload_toggle
+            autoload_toggle = config_actions_section:toggle({
+                name = "Autoload Config",
+                flag = "config_autoload_enabled",
+                default = type(initial_autoload_name) == "string" and initial_autoload_name ~= "",
+                callback = function(enabled)
+                    if not enabled then
+                        if isfile(autoload_path) then
+                            delfile(autoload_path)
+                        end
+                        return
+                    end
+
+                    local name = selected_config_name() or initial_autoload_name
+                    if not name or name == "" then
+                        notifications:create_notification({name = "Configs", info = "Select or enter a config before enabling autoload."})
+                        task.defer(function()
+                            autoload_toggle.set(false)
+                        end)
+                        return
+                    end
+
+                    local config_path = library.directory .. "/configs/" .. name .. ".cfg"
+                    if not isfile(config_path) then
+                        notifications:create_notification({name = "Configs", info = "Save the config before enabling autoload."})
+                        task.defer(function()
+                            autoload_toggle.set(false)
+                        end)
+                        return
+                    end
+
+                    initial_autoload_name = name
+                    writefile(autoload_path, name)
+                    notifications:create_notification({name = "Configs", info = "Autoload set to: " .. name})
+                end
+            })
+            config_flags["config_autoload_enabled"] = nil
+
             config_actions_section:button({
                 name = "Save Config",
                 callback = function()
@@ -3729,6 +3944,10 @@
                     end
 
                     writefile(library.directory .. "/configs/" .. name .. ".cfg", library:get_config())
+                    if flags["config_autoload_enabled"] then
+                        initial_autoload_name = name
+                        writefile(autoload_path, name)
+                    end
                     library:update_config_list()
                     notifications:create_notification({name = "Configs", info = "Saved config: " .. name})
                 end
@@ -3750,6 +3969,10 @@
                     end
 
                     library:load_config(readfile(path))
+                    if flags["config_autoload_enabled"] then
+                        initial_autoload_name = name
+                        writefile(autoload_path, name)
+                    end
                     notifications:create_notification({name = "Configs", info = "Loaded config: " .. name})
                 end
             })
@@ -3767,6 +3990,11 @@
                     if isfile(path) then
                         delfile(path)
                     end
+                    if isfile(autoload_path) and readfile(autoload_path) == name then
+                        delfile(autoload_path)
+                        initial_autoload_name = nil
+                        autoload_toggle.set(false)
+                    end
                     library:update_config_list()
                     notifications:create_notification({name = "Configs", info = "Deleted config: " .. name})
                 end
@@ -3778,6 +4006,24 @@
                     library:update_config_list()
                 end
             })
+
+            task.defer(function()
+                if type(initial_autoload_name) ~= "string" or initial_autoload_name == "" then
+                    return
+                end
+
+                local path = library.directory .. "/configs/" .. initial_autoload_name .. ".cfg"
+                if not isfile(path) then
+                    if isfile(autoload_path) then
+                        delfile(autoload_path)
+                    end
+                    autoload_toggle.set(false)
+                    return
+                end
+
+                library:load_config(readfile(path))
+                notifications:create_notification({name = "Configs", info = "Autoloaded config: " .. initial_autoload_name})
+            end)
         end
     --
 
