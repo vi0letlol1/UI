@@ -1,5 +1,5 @@
---//Thank you Finobe For This Beautiful UI
-local Services = setmetatable({}, {
+	--//Thank You Finobe For This Beautiful UI
+    local Services = setmetatable({}, {
         __index = function(self, service_name)
             local service = game:GetService(service_name)
             rawset(self, service_name, service)
@@ -2088,7 +2088,11 @@ local Services = setmetatable({}, {
 
             local slider_height = mobile_value(4, 12)
             local slider_circle_size = mobile_value(12, 18)
+            local slider_touch_height = mobile_value(18, 36)
             local active_input
+            local active_scroll_frame
+            local previous_scrolling_enabled
+            local touch_changed_connection
 
             local items = cfg.items; do
                 items[ "slider_object" ] = library:create( "TextButton" , {
@@ -2187,6 +2191,19 @@ local Services = setmetatable({}, {
                     CornerRadius = dim(0, 999)
                 });
                 
+                items[ "slider_hitbox" ] = library:create( "TextButton" , {
+                    Parent = items[ "slider" ];
+                    Name = "\0";
+                    Text = "";
+                    AutoButtonColor = false;
+                    BackgroundTransparency = 1;
+                    BorderSizePixel = 0;
+                    AnchorPoint = vec2(0, 0.5);
+                    Position = dim2(0, 0, 0.5, 0);
+                    Size = dim2(1, 0, 0, slider_touch_height);
+                    ZIndex = 10;
+                });
+
                 items[ "fill" ] = library:create( "Frame" , {
                     Name = "\0";
                     Parent = items[ "slider" ];
@@ -2263,34 +2280,117 @@ local Services = setmetatable({}, {
                 cfg.set(value)
             end
 
-            items[ "slider" ].InputBegan:Connect(function(input)
+            local function find_scroll_frame()
+                local parent = items[ "slider_object" ].Parent
+
+                while parent do
+                    if parent:IsA("ScrollingFrame") then
+                        return parent
+                    end
+
+                    parent = parent.Parent
+                end
+            end
+
+            local function restore_scrolling()
+                if active_scroll_frame and previous_scrolling_enabled ~= nil then
+                    active_scroll_frame.ScrollingEnabled = previous_scrolling_enabled
+                end
+
+                active_scroll_frame = nil
+                previous_scrolling_enabled = nil
+            end
+
+            local function finish_slider(input)
+                if not cfg.dragging then
+                    return
+                end
+
+                if input and active_input and input ~= active_input
+                    and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                    return
+                end
+
+                cfg.dragging = false
+                active_input = nil
+
+                if touch_changed_connection then
+                    touch_changed_connection:Disconnect()
+                    touch_changed_connection = nil
+                end
+
+                restore_scrolling()
+                library:tween(items[ "value" ], {TextColor3 = rgb(72, 72, 73)}, Enum.EasingStyle.Quad, 0.2)
+            end
+
+            local function begin_slider(input)
                 if not is_primary_pointer(input) then
                     return
                 end
 
+                finish_slider()
+
                 cfg.dragging = true
                 active_input = input
+                active_scroll_frame = find_scroll_frame()
+
+                if active_scroll_frame then
+                    previous_scrolling_enabled = active_scroll_frame.ScrollingEnabled
+                    active_scroll_frame.ScrollingEnabled = false
+                end
+
                 update_slider(input)
                 library:tween(items[ "value" ], {TextColor3 = rgb(255, 255, 255)}, Enum.EasingStyle.Quad, 0.2)
+
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    touch_changed_connection = input.Changed:Connect(function(property)
+                        if not cfg.dragging or input ~= active_input then
+                            return
+                        end
+
+                        if property == "Position" or input.UserInputState == Enum.UserInputState.Change then
+                            update_slider(input)
+                        end
+
+                        if input.UserInputState == Enum.UserInputState.End
+                            or input.UserInputState == Enum.UserInputState.Cancel then
+                            finish_slider(input)
+                        end
+                    end)
+                end
+            end
+
+            items[ "slider_hitbox" ].InputBegan:Connect(begin_slider)
+
+            -- Mouse movement path.
+            library:connection(uis.InputChanged, function(input)
+                if not cfg.dragging then
+                    return
+                end
+
+                if active_input and active_input.UserInputType == Enum.UserInputType.Touch then
+                    if input == active_input then
+                        update_slider(input)
+                    end
+                    return
+                end
+
+                if input.UserInputType == Enum.UserInputType.MouseMovement then
+                    update_slider(input)
+                end
             end)
 
-            library:connection(uis.InputChanged, function(input)
-                if not cfg.dragging or not is_pointer_movement(input) then
-                    return
+            -- Dedicated mobile path. TouchMoved is more reliable than InputChanged
+            -- on phones, especially when the slider is inside a ScrollingFrame.
+            library:connection(uis.TouchMoved, function(input)
+                if cfg.dragging and active_input == input then
+                    update_slider(input)
                 end
-
-                if active_input and active_input.UserInputType == Enum.UserInputType.Touch and input ~= active_input then
-                    return
-                end
-
-                update_slider(input)
             end)
 
             library:connection(uis.InputEnded, function(input)
                 if cfg.dragging and (input == active_input or input.UserInputType == Enum.UserInputType.MouseButton1) then
-                    cfg.dragging = false
-                    active_input = nil
-                    library:tween(items[ "value" ], {TextColor3 = rgb(72, 72, 73)}, Enum.EasingStyle.Quad, 0.2)
+                    finish_slider(input)
                 end
             end)
 
