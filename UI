@@ -1,4 +1,5 @@
-    local Services = setmetatable({}, {
+	--// Thank you Finobe for this beautiful UI
+	local Services = setmetatable({}, {
         __index = function(self, service_name)
             local service = game:GetService(service_name)
             rawset(self, service_name, service)
@@ -89,7 +90,8 @@
         config_flags = {},
         connections = {},   
         notifications = {notifs = {}},
-        current_open; 
+        current_open;
+        title_star_speed = 1;
     }
 
     local themes = {
@@ -452,9 +454,13 @@
         end
 
         local function make_title_gradient()
+            local white = rgb(255, 255, 255)
+
             return rgbseq({
                 rgbkey(0, themes.preset.accent),
-                rgbkey(0.55, themes.preset.accent:Lerp(themes.preset.title_gradient, 0.5)),
+                rgbkey(0.30, themes.preset.accent:Lerp(white, 0.28)),
+                rgbkey(0.50, white),
+                rgbkey(0.72, themes.preset.title_gradient:Lerp(white, 0.22)),
                 rgbkey(1, themes.preset.title_gradient),
             })
         end
@@ -655,21 +661,97 @@
                     BorderColor3 = rgb(0, 0, 0);
                     Parent = items[ "side_frame" ];
                     Name = "\0";
-                    Text = string.format('<u>%s</u>%s', cfg.name, cfg.suffix);
+                    Text = cfg.name .. cfg.suffix;
                     BackgroundTransparency = 1;
                     Size = dim2(1, 0, 0, 70);
                     TextColor3 = rgb(255, 255, 255);
                     BorderSizePixel = 0;
-                    RichText = true;
+                    RichText = false;
                     TextSize = 30;
+                    ZIndex = 3;
                     BackgroundColor3 = rgb(255, 255, 255)
                 });
 
                 items[ "title_gradient" ] = library:create( "UIGradient", {
                     Parent = items[ "title" ];
                     Color = make_title_gradient();
-                    Rotation = 0;
+                    Rotation = 14;
                 }); register_title_gradient(items[ "title_gradient" ]);
+
+                items[ "title_stars" ] = library:create( "Frame", {
+                    Parent = items[ "side_frame" ];
+                    Name = "\0";
+                    BackgroundTransparency = 1;
+                    Size = dim2(1, 0, 0, 70);
+                    Position = dim2(0, 0, 0, 0);
+                    BorderSizePixel = 0;
+                    ZIndex = 4;
+                });
+
+                local star_data = {
+                    {position = dim2(0.16, 0, 0.28, 0), size = 11, phase = 0.00, direction = 1},
+                    {position = dim2(0.25, 0, 0.72, 0), size = 7,  phase = 1.35, direction = -1},
+                    {position = dim2(0.76, 0, 0.24, 0), size = 9,  phase = 2.55, direction = -1},
+                    {position = dim2(0.85, 0, 0.68, 0), size = 7,  phase = 3.75, direction = 1},
+                }
+
+                local title_stars = {}
+                for index, star_info in star_data do
+                    local star = library:create( "ImageLabel", {
+                        Parent = items[ "title_stars" ];
+                        Name = "\0";
+                        AnchorPoint = vec2(0.5, 0.5);
+                        Position = star_info.position;
+                        Size = dim2(0, 0, 0, 0);
+                        BackgroundTransparency = 1;
+                        BorderSizePixel = 0;
+                        Image = normalize_asset(3057073083);
+                        ImageColor3 = rgb(255, 255, 255);
+                        ImageTransparency = 1;
+                        Rotation = index * 18;
+                        ZIndex = 4;
+                    });
+
+                    local star_gradient = library:create( "UIGradient", {
+                        Parent = star;
+                        Color = make_title_gradient();
+                        Rotation = 45 + (index * 22);
+                    }); register_title_gradient(star_gradient);
+
+                    title_stars[index] = {
+                        object = star;
+                        max_size = star_info.size;
+                        phase = star_info.phase;
+                        direction = star_info.direction;
+                        rotation = index * 18;
+                    }
+                end
+
+                local star_clock = 0
+                library:connection(run.RenderStepped, function(delta_time)
+                    if not items[ "title_stars" ] or not items[ "title_stars" ].Parent then
+                        return
+                    end
+
+                    local speed = clamp(tonumber(library.title_star_speed) or 1, 0.1, 5)
+                    star_clock = star_clock + (delta_time * speed)
+
+                    for index, star_state in title_stars do
+                        local star = star_state.object
+                        if star and star.Parent then
+                            local pulse = (sin((star_clock * 2.2) + star_state.phase) + 1) * 0.5
+                            pulse = pulse * pulse
+
+                            local pixel_size = star_state.max_size * pulse
+                            star.Size = dim2(0, pixel_size, 0, pixel_size)
+                            star.ImageTransparency = 1 - pulse
+
+                            star_state.rotation = star_state.rotation
+                                + (delta_time * speed * (28 + index * 7) * star_state.direction)
+                            star.Rotation = star_state.rotation
+                        end
+                    end
+                end)
                 
                 items[ "multi_holder" ] = library:create( "Frame" , {
                     Parent = items[ "main" ];
@@ -1490,7 +1572,7 @@
                 folding = options.folding or false,
                 callback = options.callback or function() end,
                 items = {},
-                seperator = options.seperator or options.Seperator or false,
+                seperator = false,
             }
 
             flags[cfg.flag] = cfg.default
@@ -3545,6 +3627,7 @@
         function library:init_config(window)
             local interface_page, configs_page = window:tab({
                 name = "Settings",
+                icon = "rbxassetid://106205298246017",
                 tabs = {"Interface", "Configs"}
             })
 
@@ -3571,6 +3654,20 @@
                 color = themes.preset.title_gradient,
                 callback = function(selected_color)
                     library:update_theme("title_gradient", selected_color)
+                end
+            })
+
+            appearance_section:slider({
+                name = "Star Animation Speed",
+                flag = "menu_title_star_speed",
+                min = 0.25,
+                max = 3,
+                default = 1,
+                interval = 0.05,
+                suffix = "x",
+                seperator = false,
+                callback = function(value)
+                    library.title_star_speed = value
                 end
             })
 
