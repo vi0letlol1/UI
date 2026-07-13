@@ -5067,38 +5067,46 @@ function library:esp_preview(options)
             return game:GetObjects("rbxassetid://7331303605")
         end)
         local Asset = Success and type(Loaded) == "table" and Loaded[1] or nil
+        if not Asset then
+            return nil, nil
+        end
+
         local Model = Instance.new("Model")
         Model.Name = "HerobrinePreviewModel"
 
-        if Asset then
-            if Asset:IsA("Model") then
-                Model:Destroy()
-                Model = Asset
-                Model.Name = "HerobrinePreviewModel"
-            elseif Asset:IsA("BasePart") then
-                Asset.Parent = Model
-            elseif Asset:IsA("Accessory") then
-                local Handle = Asset:FindFirstChild("Handle")
-                if Handle and Handle:IsA("BasePart") then
-                    Handle.Parent = Model
-                end
-                Asset:Destroy()
-            elseif Asset:IsA("DataModelMesh") then
-                local Part = Instance.new("Part")
-                Part.Name = "Herobrine"
-                Part.Size = Vector3.new(5, 7, 3)
-                Part.Anchored = true
-                Part.CanCollide = false
-                Asset.Parent = Part
-                Part.Parent = Model
-            else
-                local ParentSuccess = pcall(function()
-                    Asset.Parent = Model
-                end)
-                if not ParentSuccess then
-                    Asset:Destroy()
-                end
+        if Asset:IsA("Model") then
+            Model:Destroy()
+            Model = Asset
+            Model.Name = "HerobrinePreviewModel"
+        elseif Asset:IsA("BasePart") then
+            Asset.Parent = Model
+        elseif Asset:IsA("Accessory") then
+            local Handle = Asset:FindFirstChild("Handle")
+            if Handle and Handle:IsA("BasePart") then
+                Handle.Parent = Model
             end
+            Asset:Destroy()
+        elseif Asset:IsA("DataModelMesh") then
+            local Part = Instance.new("Part")
+            Part.Name = "Herobrine"
+            Part.Size = Vector3.new(5, 7, 3)
+            Part.Anchored = true
+            Part.CanCollide = false
+            Asset.Parent = Part
+            Part.Parent = Model
+        else
+            local ParentSuccess = pcall(function()
+                Asset.Parent = Model
+            end)
+            if not ParentSuccess then
+                Asset:Destroy()
+            end
+        end
+
+        local Descendants = Model:GetDescendants()
+        if #Descendants > 450 then
+            Model:Destroy()
+            return nil, nil
         end
 
         local Parts = {}
@@ -5119,7 +5127,6 @@ function library:esp_preview(options)
         end
 
         Prepare(Model)
-        local Descendants = Model:GetDescendants()
         for Index = #Descendants, 1, -1 do
             local Object = Descendants[Index]
             if Object and Object.Parent then
@@ -5127,15 +5134,9 @@ function library:esp_preview(options)
             end
         end
 
-        if #Parts == 0 then
+        if #Parts == 0 or #Parts > 140 then
             Model:Destroy()
-            Model = self:CreateFallbackModel()
-            Parts = {}
-            for _, Object in Model:GetDescendants() do
-                if Object:IsA("BasePart") then
-                    table.insert(Parts, Object)
-                end
-            end
+            return nil, nil
         end
 
         return Model, Parts
@@ -5166,10 +5167,17 @@ function library:esp_preview(options)
         return (Minimum + Maximum) * 0.5, Maximum - Minimum
     end
 
-    function Preview:BuildCharacter()
-        self.World:ClearAllChildren()
-        table.clear(self.Data.Parts)
-        local Model, Parts = self:LoadModel()
+    function Preview:BuildCharacter(Model, Parts)
+        if not Model or type(Parts) ~= "table" or #Parts == 0 then
+            Model = self:CreateFallbackModel()
+            Parts = {}
+            for _, Object in Model:GetDescendants() do
+                if Object:IsA("BasePart") then
+                    table.insert(Parts, Object)
+                end
+            end
+        end
+
         local Center, CenteredSize = self:CalculateBounds(Parts, true)
         if not Center then
             Center, CenteredSize = self:CalculateBounds(Parts, false)
@@ -5183,6 +5191,13 @@ function library:esp_preview(options)
                 Part.CFrame = Shift * Part.CFrame
             end
         end
+
+        if self.Highlight and self.Highlight.Parent then
+            self.Highlight:Destroy()
+            self.Highlight = nil
+        end
+        self.World:ClearAllChildren()
+        table.clear(self.Data.Parts)
 
         local RotationRoot = Instance.new("Model")
         RotationRoot.Name = "HerobrinePreviewRoot"
@@ -5199,6 +5214,8 @@ function library:esp_preview(options)
         self.Data.Model = Model
         self.Data.Size = CenteredSize
         self.CameraReady = false
+        self.StyleDirty = true
+        self.GeometryDirty = true
         self:FitCamera(CenteredSize)
         task.defer(function()
             if not self.Destroyed and self.Data.Size then
@@ -5554,8 +5571,22 @@ function library:esp_preview(options)
     end
 
     Preview:BuildCharacter()
-    pcall(Sync)
     Preview.StyleDirty = true
+    task.defer(function()
+        if Preview.Destroyed then
+            return
+        end
+        local Model, Parts = Preview:LoadModel()
+        if Preview.Destroyed then
+            if Model then
+                Model:Destroy()
+            end
+            return
+        end
+        if Model and Parts then
+            Preview:BuildCharacter(Model, Parts)
+        end
+    end)
 
     Track(uis.InputBegan, function(Input)
         if Preview.Destroyed or not Preview:IsVisible() then
