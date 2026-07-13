@@ -5013,6 +5013,8 @@ function library:esp_preview(options)
         Destroyed = false,
         StyleDirty = true,
         GeometryDirty = true,
+        HealthClock = 0,
+        HealthRatio = 1,
     }
 
     local function Track(Signal, Callback)
@@ -5290,8 +5292,13 @@ function library:esp_preview(options)
         self.LastWidth = Width
         self.LastHeight = Height
         local Health = Config.Bars["Health Bar"]
-        if Health.Enabled and SizeChanged then
-            Controller:UpdateBarLayout(self.Data, "HealthBar", 1, Width, Height)
+        if Health.Enabled then
+            local Ratio = math.clamp(self.HealthRatio or 1, 0, 1)
+            Controller:UpdateBarLayout(self.Data, "HealthBar", Ratio, Width, Height)
+            Objects.HealthBarText.Visible = Health.Text == true
+            Objects.HealthBarText.Text = tostring(math.floor(Ratio * 100 + 0.5))
+        else
+            Objects.HealthBarText.Visible = false
         end
         if SizeChanged and not self.DraggingElement and self.StyleDirty ~= true then
             Controller:ApplyLayout(self.Data)
@@ -5320,8 +5327,8 @@ function library:esp_preview(options)
             ColorSequenceKeypoint.new(0.5, Health.Mid),
             ColorSequenceKeypoint.new(1, Health.Bot),
         })
-        Objects.HealthBarText.Visible = false
-        Objects.HealthBarText.Text = "100"
+        Objects.HealthBarText.Visible = Health.Enabled and Health.Text == true
+        Objects.HealthBarText.Text = tostring(math.floor((self.HealthRatio or 1) * 100 + 0.5))
         Objects.ArmorBarOutline.Visible = false
 
         local Texts = Config.Texts
@@ -5715,6 +5722,9 @@ function library:esp_preview(options)
         end
 
         Preview:UpdateCharacter(math.min(DeltaTime, 0.05))
+        Preview.HealthClock = (Preview.HealthClock + DeltaTime) % 6
+        Preview.HealthRatio = (math.cos((Preview.HealthClock / 6) * math.pi * 2) + 1) * 0.5
+        Preview.GeometryDirty = true
         PreviewGeometryElapsed += DeltaTime
         PreviewSignatureElapsed += DeltaTime
 
