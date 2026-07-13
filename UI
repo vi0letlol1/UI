@@ -5377,16 +5377,53 @@ function library:esp_preview(options)
     end
 
     function Preview:UpdateCharacter(DeltaTime)
-        if not self.Data.Clone or not self.Data.Clone.Parent then
+        local Clone = self.Data.Clone
+        if not Clone or not Clone.Parent then
             return
         end
         if not self.DraggingModel and not self.DraggingElement then
             self.Yaw += DeltaTime * 0.62
         end
-        pcall(function()
-            self.Data.Clone:PivotTo(CFrame.Angles(0, self.Yaw, 0))
-        end)
+        Clone:PivotTo(CFrame.Angles(0, self.Yaw, 0))
         self.GeometryDirty = true
+    end
+
+    function Preview:RestoreViewport()
+        if self.Destroyed or not self.Holder.Parent then
+            return false
+        end
+        if self.World.Parent ~= self.Viewport then
+            self.World.Parent = self.Viewport
+        end
+        if self.Camera.Parent ~= self.Viewport then
+            self.Camera.Parent = self.Viewport
+        end
+        if self.Viewport.CurrentCamera ~= self.Camera then
+            self.Viewport.CurrentCamera = self.Camera
+        end
+        self.Holder.Visible = true
+        self.Viewport.Visible = true
+        self.Overlay.Visible = true
+        local Clone = self.Data.Clone
+        if Clone and Clone.Parent ~= self.World then
+            Clone.Parent = self.World
+        end
+        if self.Data.Size then
+            self:FitCamera(self.Data.Size)
+        end
+        return true
+    end
+
+    function Preview:Refresh()
+        if self.Destroyed then
+            return
+        end
+        self.StyleDirty = true
+        self.GeometryDirty = true
+        if self:IsVisible() and self:RestoreViewport() then
+            self:RefreshStyle()
+            self:RefreshGeometry()
+        end
     end
 
     function Preview:GetElementBounds(Element)
@@ -5452,16 +5489,20 @@ function library:esp_preview(options)
 
     function Preview:IsVisible()
         local Current = self.Holder
+        local Attached = false
         while Current do
             if Current:IsA("GuiObject") and Current.Visible == false then
                 return false
             end
-            if Current:IsA("LayerCollector") and Current.Enabled == false then
-                return false
+            if Current:IsA("LayerCollector") then
+                Attached = true
+                if Current.Enabled == false then
+                    return false
+                end
             end
             Current = Current.Parent
         end
-        return self.Holder.Parent ~= nil and self.Viewport.AbsoluteSize.X > 1 and self.Viewport.AbsoluteSize.Y > 1
+        return Attached and self.Holder.Parent ~= nil and self.Viewport.AbsoluteSize.X > 1 and self.Viewport.AbsoluteSize.Y > 1
     end
 
     function Preview:GetFlagSignature()
@@ -5657,23 +5698,34 @@ function library:esp_preview(options)
         end
     end)
 
-    local PreviewUpdateElapsed = 0
+    local PreviewGeometryElapsed = 0
     local PreviewSignatureElapsed = 0
+    local PreviewWasVisible = false
     Track(run.RenderStepped, function(DeltaTime)
         if Preview.Destroyed then
             return
         end
-        if not Preview:IsVisible() then
-            PreviewUpdateElapsed = 0
+        local Visible = Preview:IsVisible()
+        if not Visible then
+            PreviewWasVisible = false
+            PreviewGeometryElapsed = 0
             PreviewSignatureElapsed = 0
             return
         end
 
-        PreviewUpdateElapsed += DeltaTime
+        if not PreviewWasVisible then
+            PreviewWasVisible = true
+            Preview:RestoreViewport()
+            Preview.StyleDirty = true
+            Preview.GeometryDirty = true
+        end
+
+        Preview:UpdateCharacter(math.min(DeltaTime, 0.05))
+        PreviewGeometryElapsed += DeltaTime
         PreviewSignatureElapsed += DeltaTime
 
-        if PreviewSignatureElapsed >= 0.25 then
-            PreviewSignatureElapsed = 0
+        if PreviewSignatureElapsed >= 0.2 then
+            PreviewSignatureElapsed = PreviewSignatureElapsed % 0.2
             local Signature = Preview:GetFlagSignature()
             if Preview.LastFlagSignature ~= Signature then
                 Preview.LastFlagSignature = Signature
@@ -5682,13 +5734,12 @@ function library:esp_preview(options)
             end
         end
 
-        if PreviewUpdateElapsed >= 1 / 15 then
-            local Step = PreviewUpdateElapsed
-            PreviewUpdateElapsed = 0
-            Preview:UpdateCharacter(Step)
-            if Preview.StyleDirty then
-                Preview:RefreshStyle()
-            end
+        if Preview.StyleDirty then
+            Preview:RefreshStyle()
+        end
+
+        if PreviewGeometryElapsed >= 1 / 30 then
+            PreviewGeometryElapsed = PreviewGeometryElapsed % (1 / 30)
             if Preview.GeometryDirty then
                 Preview.GeometryDirty = false
                 Preview:RefreshGeometry()
