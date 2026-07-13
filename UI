@@ -1263,7 +1263,7 @@ local library = (function()
 
             local items = cfg.items; do
                 items[ "tab_holder" ] = library:create( "Frame" , {
-                    Parent = library.cache;
+                    Parent = self.items[ "main" ];
                     Name = "\0";
                     Visible = false;
                     BackgroundTransparency = 1;
@@ -1341,7 +1341,7 @@ local library = (function()
 
 
                     items[ "multi_section_button_holder" ] = library:create( "Frame" , {
-                        Parent = library.cache;
+                        Parent = self.items[ "multi_holder" ];
                         BackgroundTransparency = 1;
                         Name = "\0";
                         Visible = false;
@@ -1440,7 +1440,7 @@ local library = (function()
 
 
                                 multi_items[ "tab" ] = library:create( "Frame" , {
-                                    Parent = library.cache;
+                                    Parent = items[ "tab_holder" ];
                                     BackgroundTransparency = 1;
                                     Name = "\0";
                                     BorderColor3 = rgb(0, 0, 0);
@@ -1493,7 +1493,6 @@ local library = (function()
                                 library:tween(page.button, {BackgroundTransparency = 1})
 
                                 page.page.Visible = false
-                                page.page.Parent = library[ "cache" ]
                             end
 
                             library:tween(data.text, {TextColor3 = rgb(255, 255, 255)})
@@ -1502,7 +1501,6 @@ local library = (function()
                             library:tween(data.page, {Size = dim2(1, 0, 1, 0)}, Enum.EasingStyle.Quad, 0.4)
 
                             data.page.Visible = true
-                            data.page.Parent = items["tab_holder"]
 
                             cfg.current_multi = data
 
@@ -1536,9 +1534,7 @@ local library = (function()
                     library:tween(selected_tab[ 3 ], {TextColor3 = rgb(72, 72, 73)})
 
                     selected_tab[ 4 ].Visible = false
-                    selected_tab[ 4 ].Parent = library[ "cache" ]
                     selected_tab[ 5 ].Visible = false
-                    selected_tab[ 5 ].Parent = library[ "cache" ]
                 end
 
                 library:tween(items[ "button" ], {BackgroundTransparency = 0})
@@ -1547,9 +1543,7 @@ local library = (function()
                 library:tween(items[ "tab_holder" ], {Size = dim2(1, -196, 1, -81)}, Enum.EasingStyle.Quad, 0.4)
 
                 items[ "tab_holder" ].Visible = true
-                items[ "tab_holder" ].Parent = self.items[ "main" ]
                 items[ "multi_section_button_holder" ].Visible = true
-                items[ "multi_section_button_holder" ].Parent = self.items[ "multi_holder" ]
 
                 self.selected_tab = {
                     items[ "button" ];
