@@ -1,3 +1,4 @@
+--//Thank You Finobe For This Beautiful UI
 local library = (function()
 
     local Services = setmetatable({}, {
@@ -240,8 +241,8 @@ local library = (function()
 
     local themes = {
         preset = {
-            accent = rgb(155, 150, 219),
-            title_gradient = rgb(115, 205, 255),
+            accent = rgb(238, 93, 176),
+            title_gradient = rgb(79, 170, 255),
         },
 
         utility = {
@@ -1240,16 +1241,32 @@ local library = (function()
                         BackgroundColor3 = rgb(29, 29, 29)
                     });
 
+                    items[ "icon_backdrop" ] = library:create("Frame", {
+                        Parent = items[ "button" ];
+                        AnchorPoint = vec2(0, 0.5);
+                        Position = dim2(0, 7, 0.5, 0);
+                        Size = dim2(0, 28, 0, 28);
+                        BackgroundColor3 = themes.preset.accent;
+                        BackgroundTransparency = 0.86;
+                        BorderSizePixel = 0;
+                        Name = "\0";
+                    }); library:apply_theme(items[ "icon_backdrop" ], "accent", "BackgroundColor3");
+
+                    library:create("UICorner", {
+                        Parent = items[ "icon_backdrop" ];
+                        CornerRadius = dim(0, 7);
+                    });
+
                     items[ "icon" ] = library:create( "ImageLabel" , {
                         ImageColor3 = rgb(72, 72, 73);
                         BorderColor3 = rgb(0, 0, 0);
-                        Parent = items[ "button" ];
-                        AnchorPoint = vec2(0, 0.5);
+                        Parent = items[ "icon_backdrop" ];
+                        AnchorPoint = vec2(0.5, 0.5);
                         Image = cfg.icon;
                         BackgroundTransparency = 1;
-                        Position = dim2(0, 10, 0.5, 0);
+                        Position = dim2(0.5, 0, 0.5, 0);
                         Name = "\0";
-                        Size = dim2(0, 22, 0, 22);
+                        Size = dim2(0, 18, 0, 18);
                         BorderSizePixel = 0;
                         BackgroundColor3 = rgb(255, 255, 255)
                     }); library:apply_theme(items[ "icon" ], "accent", "ImageColor3");
@@ -1722,16 +1739,32 @@ local library = (function()
                     CornerRadius = dim(0, 7)
                 });
 
+                items[ "IconBackdrop" ] = library:create("Frame", {
+                    Parent = items[ "button" ];
+                    AnchorPoint = vec2(0, 0.5);
+                    Position = dim2(0, 7, 0.5, 0);
+                    Size = dim2(0, 28, 0, 28);
+                    BackgroundColor3 = themes.preset.accent;
+                    BackgroundTransparency = 0.86;
+                    BorderSizePixel = 0;
+                    Name = "\0";
+                }); library:apply_theme(items[ "IconBackdrop" ], "accent", "BackgroundColor3");
+
+                library:create("UICorner", {
+                    Parent = items[ "IconBackdrop" ];
+                    CornerRadius = dim(0, 7);
+                });
+
                 items[ "Icon" ] = library:create( "ImageLabel" , {
                     ImageColor3 = themes.preset.accent;
                     BorderColor3 = rgb(0, 0, 0);
-                    Parent = items[ "button" ];
-                    AnchorPoint = vec2(0, 0.5);
+                    Parent = items[ "IconBackdrop" ];
+                    AnchorPoint = vec2(0.5, 0.5);
                     Image = cfg.icon;
                     BackgroundTransparency = 1;
-                    Position = dim2(0, 10, 0.5, 0);
+                    Position = dim2(0.5, 0, 0.5, 0);
                     Name = "\0";
-                    Size = dim2(0, 22, 0, 22);
+                    Size = dim2(0, 18, 0, 18);
                     BorderSizePixel = 0;
                     BackgroundColor3 = rgb(255, 255, 255)
                 }); library:apply_theme(items[ "Icon" ], "accent", "ImageColor3");
@@ -5155,21 +5188,53 @@ function library:esp_preview(options)
         end
     end
 
+    function Preview:GetElementBounds(Element)
+        local MinimumX, MinimumY = math.huge, math.huge
+        local MaximumX, MaximumY = -math.huge, -math.huge
+        local Found = false
+        local function Include(Object)
+            if not Object:IsA("GuiObject") or not Object.Visible then return end
+            local Position = Object.AbsolutePosition
+            local Size = Object.AbsoluteSize
+            if Size.X <= 0 or Size.Y <= 0 then return end
+            MinimumX = math.min(MinimumX, Position.X)
+            MinimumY = math.min(MinimumY, Position.Y)
+            MaximumX = math.max(MaximumX, Position.X + Size.X)
+            MaximumY = math.max(MaximumY, Position.Y + Size.Y)
+            Found = true
+        end
+        Include(Element)
+        for _, Descendant in Element:GetDescendants() do
+            Include(Descendant)
+        end
+        if not Found then return end
+        return MinimumX, MinimumY, MaximumX, MaximumY
+    end
+
     function Preview:GetLayoutElement(Position)
         local Elements = Controller:GetLayoutObjects(self.Data.Objects)
+        local BestKey, BestElement, BestArea
         for Key, Element in Elements do
             if Element and Element.Visible then
-                local ObjectPosition = Element.AbsolutePosition
-                local ObjectSize = Element.AbsoluteSize
-                local Margin = Controller:IsBarKey(Key) and 8 or 3
-                if Position.X >= ObjectPosition.X - Margin
-                    and Position.X <= ObjectPosition.X + ObjectSize.X + Margin
-                    and Position.Y >= ObjectPosition.Y - Margin
-                    and Position.Y <= ObjectPosition.Y + ObjectSize.Y + Margin then
-                    return Key, Element
+                local Left, Top, Right, Bottom = self:GetElementBounds(Element)
+                if Left then
+                    local Margin = Controller:IsBarKey(Key) and 13 or 7
+                    Left -= Margin
+                    Top -= Margin
+                    Right += Margin
+                    Bottom += Margin
+                    if Position.X >= Left and Position.X <= Right and Position.Y >= Top and Position.Y <= Bottom then
+                        local Area = math.max(1, Right - Left) * math.max(1, Bottom - Top)
+                        if not BestArea or Area < BestArea then
+                            BestKey = Key
+                            BestElement = Element
+                            BestArea = Area
+                        end
+                    end
                 end
             end
         end
+        return BestKey, BestElement
     end
 
     function Preview:IsInsideOverlay(Position)
@@ -5237,6 +5302,7 @@ function library:esp_preview(options)
     function Preview:StartElementDrag(Key, Element, Position)
         self.DraggingElement = Key
         self.DragElement = Element
+        self.DragOriginalZIndex = Element.ZIndex
         self.DragOffset = Vector2.new(Position.X, Position.Y) - Element.AbsolutePosition
         local Absolute = Element.AbsolutePosition - self.Overlay.AbsolutePosition
         Element.Parent = self.Overlay
@@ -5248,7 +5314,12 @@ function library:esp_preview(options)
     function Preview:MoveElement(Position)
         if not self.DragElement then return end
         local Local = Vector2.new(Position.X, Position.Y) - self.Overlay.AbsolutePosition - self.DragOffset
-        self.DragElement.Position = UDim2.fromOffset(Local.X, Local.Y)
+        local OverlaySize = self.Overlay.AbsoluteSize
+        local ElementSize = self.DragElement.AbsoluteSize
+        local Padding = 72
+        local X = math.clamp(Local.X, -Padding, OverlaySize.X - ElementSize.X + Padding)
+        local Y = math.clamp(Local.Y, -Padding, OverlaySize.Y - ElementSize.Y + Padding)
+        self.DragElement.Position = UDim2.fromOffset(X, Y)
     end
 
     function Preview:FinishElementDrag(Position)
@@ -5260,9 +5331,13 @@ function library:esp_preview(options)
             Entry.Zone = Zone
             Flags["esp_layout_" .. string.lower(Key) .. "_zone"] = Zone
         end
+        if self.DragElement and self.DragOriginalZIndex then
+            self.DragElement.ZIndex = self.DragOriginalZIndex
+        end
         self.DraggingElement = nil
         self.DragElement = nil
         self.DragOffset = nil
+        self.DragOriginalZIndex = nil
         Controller:ApplyLayout(self.Data)
     end
 
@@ -5282,11 +5357,12 @@ function library:esp_preview(options)
     table.insert(Preview.Connections, uis.InputBegan:Connect(function(Input)
         local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
             or Input.UserInputType == Enum.UserInputType.Touch
-        if not Primary or not Preview:IsInsideOverlay(Input.Position) then return end
+        if not Primary then return end
         local Key, Element = Preview:GetLayoutElement(Input.Position)
         if Key then
+            Preview.DragInput = Input
             Preview:StartElementDrag(Key, Element, Input.Position)
-        else
+        elseif Preview:IsInsideOverlay(Input.Position) then
             Preview.DraggingModel = true
             Preview.DragInput = Input
             Preview.LastPointerX = Input.Position.X
@@ -5296,6 +5372,7 @@ function library:esp_preview(options)
         local Movement = Input.UserInputType == Enum.UserInputType.MouseMovement
             or Input.UserInputType == Enum.UserInputType.Touch
         if not Movement then return end
+        if Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch and Input ~= Preview.DragInput then return end
         if Preview.DraggingElement then
             Preview:MoveElement(Input.Position)
         elseif Preview.DraggingModel then
@@ -5307,6 +5384,7 @@ function library:esp_preview(options)
         local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
             or Input.UserInputType == Enum.UserInputType.Touch
         if not Primary then return end
+        if Preview.DragInput and Input ~= Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch then return end
         if Preview.DraggingElement then
             Preview:FinishElementDrag(Input.Position)
         end
