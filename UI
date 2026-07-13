@@ -225,7 +225,7 @@ local library = (function()
 
 
     getgenv().library = {
-        directory = "milenium",
+        directory = "Violet",
         folders = {
             "/fonts",
             "/configs",
