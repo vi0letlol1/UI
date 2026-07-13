@@ -1,4 +1,3 @@
---//Thank You Finobe For This Beautiful Ui
 local library = (function()
 
     local Services = setmetatable({}, {
@@ -4860,6 +4859,490 @@ local library = (function()
             end)
         end
 
+
+
+function library:esp_preview(options)
+    options = options or {}
+    local Controller = options.controller
+    local Flags = options.flags or library.flags
+    local Sync = options.sync or function() end
+    if type(Controller) ~= "table" or type(Controller.InitEsp) ~= "function" then
+        return nil
+    end
+    local Holder = Instance.new("Frame")
+    Holder.Name = "\0"
+    Holder.Active = true
+    Holder.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
+    Holder.BorderSizePixel = 0
+    Holder.Size = UDim2.new(1, 0, 0, 245)
+    Holder.Parent = options.parent or (self.items and self.items.elements)
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Holder
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(36, 36, 39)
+    Stroke.Thickness = 1
+    Stroke.Parent = Holder
+
+    local Viewport = Instance.new("ViewportFrame")
+    Viewport.Name = "\0"
+    Viewport.Active = true
+    Viewport.Ambient = Color3.fromRGB(180, 180, 180)
+    Viewport.BackgroundTransparency = 1
+    Viewport.BorderSizePixel = 0
+    Viewport.LightColor = Color3.new(1, 1, 1)
+    Viewport.LightDirection = Vector3.new(-1, -1, -1)
+    Viewport.Position = UDim2.fromOffset(8, 8)
+    Viewport.Size = UDim2.new(1, -16, 1, -16)
+    Viewport.Parent = Holder
+
+    local World = Instance.new("WorldModel")
+    World.Parent = Viewport
+
+    local PreviewCamera = Instance.new("Camera")
+    PreviewCamera.FieldOfView = 35
+    PreviewCamera.Parent = Viewport
+    Viewport.CurrentCamera = PreviewCamera
+
+    local Overlay = Instance.new("Frame")
+    Overlay.Name = "\0"
+    Overlay.Active = true
+    Overlay.BackgroundTransparency = 1
+    Overlay.BorderSizePixel = 0
+    Overlay.ClipsDescendants = false
+    Overlay.Size = UDim2.fromScale(1, 1)
+    Overlay.ZIndex = 20
+    Overlay.Parent = Viewport
+
+    local PreviewData = {
+        Objects = {},
+        IconUrl = nil,
+        Parts = {},
+    }
+    Controller:InitEsp(PreviewData, Overlay)
+
+    for _, Object in Overlay:GetDescendants() do
+        if Object:IsA("GuiObject") then
+            Object.ZIndex += 20
+            Object.Active = true
+        end
+    end
+
+    local Preview = {
+        Holder = Holder,
+        Viewport = Viewport,
+        World = World,
+        Camera = PreviewCamera,
+        Overlay = Overlay,
+        Data = PreviewData,
+        Connections = {},
+        Yaw = 0,
+        DraggingModel = false,
+        DraggingElement = nil,
+    }
+
+    function Preview:FitCamera(Size)
+        local ViewportSize = self.Viewport.AbsoluteSize
+        if ViewportSize.X <= 1 or ViewportSize.Y <= 1 then return end
+        local VerticalFov = math.rad(35)
+        local Aspect = ViewportSize.X / math.max(ViewportSize.Y, 1)
+        local HorizontalFov = 2 * math.atan(math.tan(VerticalFov * 0.5) * Aspect)
+        local Width = math.sqrt(Size.X * Size.X + Size.Z * Size.Z)
+        local VerticalDistance = (Size.Y * 0.5) / math.tan(VerticalFov * 0.5)
+        local HorizontalDistance = (Width * 0.5) / math.tan(HorizontalFov * 0.5)
+        local Distance = (math.max(VerticalDistance, HorizontalDistance) + Width * 0.5) * 1.01
+        self.Camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -Distance), Vector3.zero)
+        self.CameraReady = true
+    end
+
+    function Preview:BuildCharacter()
+        self.World:ClearAllChildren()
+        table.clear(self.Data.Parts)
+
+        local Model = Instance.new("Model")
+        Model.Name = "ESPPreviewRig"
+
+        local function CreatePart(Name, Size, Relative, PartColor, Shape)
+            local Part = Instance.new("Part")
+            Part.Name = Name
+            Part.Anchored = true
+            Part.CanCollide = false
+            Part.CanTouch = false
+            Part.CanQuery = false
+            Part.CastShadow = false
+            Part.Material = Enum.Material.SmoothPlastic
+            Part.Color = PartColor
+            Part.Size = Size
+            Part.CFrame = Relative
+            if Shape then
+                Part.Shape = Shape
+            end
+            Part.Parent = Model
+            table.insert(self.Data.Parts, {Part = Part, Relative = Relative})
+            return Part
+        end
+
+        local Skin = Color3.fromRGB(214, 170, 132)
+        local Shirt = Color3.fromRGB(47, 50, 61)
+        local Pants = Color3.fromRGB(31, 33, 40)
+        local Shoes = Color3.fromRGB(18, 18, 20)
+
+        local Torso = CreatePart("Torso", Vector3.new(2.2, 2.7, 1.1), CFrame.new(0, 0.35, 0), Shirt)
+        CreatePart("Head", Vector3.new(1.55, 1.55, 1.55), CFrame.new(0, 2.55, 0), Skin, Enum.PartType.Ball)
+        CreatePart("LeftArm", Vector3.new(0.78, 2.55, 0.82), CFrame.new(-1.5, 0.35, 0), Shirt)
+        CreatePart("RightArm", Vector3.new(0.78, 2.55, 0.82), CFrame.new(1.5, 0.35, 0), Shirt)
+        CreatePart("Waist", Vector3.new(1.95, 0.72, 1.02), CFrame.new(0, -1.28, 0), Pants)
+        CreatePart("LeftLeg", Vector3.new(0.88, 2.65, 0.92), CFrame.new(-0.56, -2.86, 0), Pants)
+        CreatePart("RightLeg", Vector3.new(0.88, 2.65, 0.92), CFrame.new(0.56, -2.86, 0), Pants)
+        CreatePart("LeftFoot", Vector3.new(0.92, 0.52, 1.35), CFrame.new(-0.56, -4.34, -0.18), Shoes)
+        CreatePart("RightFoot", Vector3.new(0.92, 0.52, 1.35), CFrame.new(0.56, -4.34, -0.18), Shoes)
+
+        Model.PrimaryPart = Torso
+        Model.Parent = self.World
+
+        local _, BoundingSize = Model:GetBoundingBox()
+        self.Data.Clone = Model
+        self.Data.Size = BoundingSize
+        self.CameraReady = false
+        self:FitCamera(BoundingSize)
+        task.defer(function()
+            if self.Data.Size then
+                self:FitCamera(self.Data.Size)
+            end
+        end)
+    end
+
+    function Preview:GetBounds()
+        local Size = self.Viewport.AbsoluteSize
+        if Size.X <= 1 or Size.Y <= 1 then return end
+        local FocalLength = Size.Y / (2 * math.tan(math.rad(self.Camera.FieldOfView) * 0.5))
+        local CameraCFrame = self.Camera.CFrame
+        local MinimumX, MinimumY = math.huge, math.huge
+        local MaximumX, MaximumY = -math.huge, -math.huge
+        local Found = false
+
+        for _, Mapping in self.Data.Parts do
+            local Part = Mapping.Part
+            if Part.Parent and Part.Transparency < 1 and Part.Name ~= "HumanoidRootPart" then
+                local Center = CameraCFrame:PointToObjectSpace(Part.Position)
+                local Depth = -Center.Z
+                if Depth > 0.01 then
+                    local Half = Part.Size * 0.5
+                    local Right = CameraCFrame:VectorToObjectSpace(Part.CFrame.RightVector)
+                    local Up = CameraCFrame:VectorToObjectSpace(Part.CFrame.UpVector)
+                    local Look = CameraCFrame:VectorToObjectSpace(Part.CFrame.LookVector)
+                    local Scale = FocalLength / Depth
+                    local ExtendX = (math.abs(Right.X * Half.X) + math.abs(Up.X * Half.Y) + math.abs(Look.X * Half.Z)) * Scale
+                    local ExtendY = (math.abs(Right.Y * Half.X) + math.abs(Up.Y * Half.Y) + math.abs(Look.Y * Half.Z)) * Scale
+                    local X = Size.X * 0.5 + Center.X * Scale
+                    local Y = Size.Y * 0.5 - Center.Y * Scale
+                    MinimumX, MaximumX = math.min(MinimumX, X - ExtendX), math.max(MaximumX, X + ExtendX)
+                    MinimumY, MaximumY = math.min(MinimumY, Y - ExtendY), math.max(MaximumY, Y + ExtendY)
+                    Found = true
+                end
+            end
+        end
+        if not Found then return end
+        local Bounding = Controller.Table.Boxes["Bounding Box"]
+        local PaddingX, PaddingY = Bounding.BoxX or 0, Bounding.BoxY or 0
+        return math.floor(MinimumX - PaddingX * 0.5), math.floor(MinimumY - PaddingY * 0.5),
+            math.max(1, math.floor(MaximumX - MinimumX + PaddingX)),
+            math.max(1, math.floor(MaximumY - MinimumY + PaddingY))
+    end
+
+    function Preview:Refresh()
+        local Objects = self.Data.Objects
+        local Config = Controller.Table
+        if not self.CameraReady and self.Data.Size then
+            self:FitCamera(self.Data.Size)
+        end
+        local X, Y, Width, Height = self:GetBounds()
+        if not X or not Config.Enabled then
+            Objects.TargetHolder.Visible = false
+            return
+        end
+
+        Objects.TargetHolder.Visible = true
+        Objects.TargetHolder.Position = UDim2.fromOffset(X, Y)
+        Objects.TargetHolder.Size = UDim2.fromOffset(Width, Height)
+        Objects.BoxGlow.Size = UDim2.fromOffset(Width, Height)
+        Objects.BoxOutlineHolder.Size = UDim2.fromOffset(Width, Height)
+        Objects.BoxInlineHolder.Size = UDim2.fromOffset(Width + 2, Height + 2)
+        Objects.BoxFill.Size = UDim2.fromOffset(Width, Height)
+
+        local Boxes = Config.Boxes
+        local Glow = Boxes["Box Glow"]
+        Objects.BoxGlow.ImageTransparency = Boxes.Enabled and Glow.Enabled and 0 or 1
+        Objects.BoxOutlineHolder.Visible = Boxes.Enabled
+        Objects.BoxInlineHolder.Visible = Boxes.Enabled
+        Objects.BoxFill.Visible = Boxes.Enabled and Boxes.Filled.Enabled
+        Objects.BoxGlowGradient.Color = ColorSequence.new(Glow.Top, Glow.Bot)
+        Objects.BoxGlowGradient.Transparency = NumberSequence.new(Glow.Transparency[1], Glow.Transparency[2])
+        Objects.BoxInlineGradient.Color = ColorSequence.new(Boxes.Gradients.Top, Boxes.Gradients.Bot)
+        Objects.BoxFillGradient.Color = ColorSequence.new(Boxes.Filled.Top, Boxes.Filled.Bot)
+        Objects.BoxFillGradient.Transparency = NumberSequence.new(Boxes.Filled.Transparency[1], Boxes.Filled.Transparency[2])
+
+        local Health = Config.Bars["Health Bar"]
+        local Humanoid = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        local HealthValue = Humanoid and Humanoid.Health or 100
+        local MaxHealth = Humanoid and Humanoid.MaxHealth or 100
+        local HealthRatio = math.clamp(HealthValue / math.max(MaxHealth, 1), 0, 1)
+        Objects.HealthBarOutline.Visible = Health.Enabled
+        if Health.Enabled then
+            Controller:UpdateBarLayout(self.Data, "HealthBar", HealthRatio, Width, Height)
+            Objects.HealthBarGradient.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Health.Top),
+                ColorSequenceKeypoint.new(0.5, Health.Mid),
+                ColorSequenceKeypoint.new(1, Health.Bot),
+            })
+            Objects.HealthBarText.Visible = HealthRatio < 1
+            Objects.HealthBarText.Text = tostring(math.floor(HealthValue))
+        end
+        Objects.ArmorBarOutline.Visible = false
+
+        local Texts = Config.Texts
+        local Tool = lp.Character and lp.Character:FindFirstChildOfClass("Tool")
+        Objects.NameRow.Visible = Texts.Name.Enabled
+        Objects.TargetName.Visible = Texts.Name.Enabled
+        Objects.TargetName.Text = Texts.Name.UseDisplay and (lp.DisplayName .. " (@" .. lp.Name .. ")") or lp.Name
+        Objects.TargetNameGradient.Color = ColorSequence.new(Texts.Name.Top, Texts.Name.Bot)
+        Objects.PlayerIcon.Visible = false
+        Objects.Distance.Visible = Texts.Distance.Enabled
+        Objects.Distance.Text = "76st"
+        Objects.DistanceGradient.Color = ColorSequence.new(Texts.Distance.Top, Texts.Distance.Bot)
+        Objects.Weapon.Visible = Texts.Weapon.Enabled
+        Objects.Weapon.Text = Tool and Tool.Name or "none"
+        Objects.WeaponGradient.Color = ColorSequence.new(Texts.Weapon.Top, Texts.Weapon.Bot)
+        Objects.WeaponImage.Visible = false
+        Objects.FlagsRow.Visible = Texts.Flags.Enabled
+        Objects.IdleFlag.Visible = Texts.Flags.Enabled
+        Objects.WalkFlag.Visible = false
+        Objects.JumpFlag.Visible = false
+        local FlagColors = ColorSequence.new(Texts.Flags.Top, Texts.Flags.Bot)
+        Objects.IdleFlagGradient.Color = FlagColors
+        Objects.WalkFlagGradient.Color = FlagColors
+        Objects.JumpFlagGradient.Color = FlagColors
+
+        local Highlight = self.Data.Clone and self.Data.Clone:FindFirstChild("ESPPreviewChams")
+        if Config.Chams.Enabled and self.Data.Clone then
+            Highlight = Highlight or Instance.new("Highlight")
+            Highlight.Name = "ESPPreviewChams"
+            Highlight.Parent = self.Data.Clone
+            Highlight.FillColor = Config.Chams.FillColor
+            Highlight.OutlineColor = Config.Chams.GlowColor
+            Highlight.FillTransparency = Config.Chams.FillTransparency
+            Highlight.OutlineTransparency = 0
+        elseif Highlight then
+            Highlight:Destroy()
+        end
+
+        if not self.DraggingElement then
+            Controller:ApplyLayout(self.Data)
+        end
+    end
+
+    function Preview:UpdateCharacter(DeltaTime)
+        if not self.DraggingModel and not self.DraggingElement then
+            self.Yaw += DeltaTime * 0.72
+        end
+        local Rotation = CFrame.Angles(0, self.Yaw, 0)
+        for _, Mapping in self.Data.Parts do
+            if Mapping.Part and Mapping.Part.Parent then
+                Mapping.Part.CFrame = Rotation * Mapping.Relative
+            end
+        end
+    end
+
+    function Preview:GetLayoutElement(Position)
+        local Elements = Controller:GetLayoutObjects(self.Data.Objects)
+        for Key, Element in Elements do
+            if Element and Element.Visible then
+                local ObjectPosition = Element.AbsolutePosition
+                local ObjectSize = Element.AbsoluteSize
+                local Margin = Controller:IsBarKey(Key) and 8 or 3
+                if Position.X >= ObjectPosition.X - Margin
+                    and Position.X <= ObjectPosition.X + ObjectSize.X + Margin
+                    and Position.Y >= ObjectPosition.Y - Margin
+                    and Position.Y <= ObjectPosition.Y + ObjectSize.Y + Margin then
+                    return Key, Element
+                end
+            end
+        end
+    end
+
+    function Preview:IsInsideOverlay(Position)
+        local ObjectPosition = self.Overlay.AbsolutePosition
+        local ObjectSize = self.Overlay.AbsoluteSize
+        return Position.X >= ObjectPosition.X
+            and Position.X <= ObjectPosition.X + ObjectSize.X
+            and Position.Y >= ObjectPosition.Y
+            and Position.Y <= ObjectPosition.Y + ObjectSize.Y
+    end
+
+    function Preview:IsVisible()
+        local Current = self.Holder
+        while Current do
+            if Current:IsA("GuiObject") and Current.Visible == false then return false end
+            if Current:IsA("LayerCollector") and Current.Enabled == false then return false end
+            Current = Current.Parent
+        end
+        return self.Holder.Parent ~= nil and self.Viewport.AbsoluteSize.X > 1 and self.Viewport.AbsoluteSize.Y > 1
+    end
+
+    function Preview:GetFlagSignature()
+        local Values = {}
+        for Key, Value in Flags do
+            if string.sub(tostring(Key), 1, 4) == "esp_" then
+                local Text
+                if type(Value) == "table" then
+                    Text = tostring(Value.Color or Value.color or "")
+                        .. ":" .. tostring(Value.Transparency or Value.transparency or "")
+                        .. ":" .. tostring(Value.mode or "")
+                        .. ":" .. tostring(Value.key or "")
+                        .. ":" .. tostring(Value.active or "")
+                else
+                    Text = tostring(Value)
+                end
+                table.insert(Values, tostring(Key) .. "=" .. Text)
+            end
+        end
+        table.sort(Values)
+        return table.concat(Values, "|")
+    end
+
+    function Preview:GetNearestZone(Position)
+        local Target = self.Data.Objects.TargetHolder
+        local Left = Target.AbsolutePosition.X
+        local Top = Target.AbsolutePosition.Y
+        local Right = Left + Target.AbsoluteSize.X
+        local Bottom = Top + Target.AbsoluteSize.Y
+        local Third = Target.AbsoluteSize.X / 3
+
+        if Position.Y < Top then
+            if Position.X < Left + Third then return "TopLeft" end
+            if Position.X > Right - Third then return "TopRight" end
+            return "Top"
+        elseif Position.Y > Bottom then
+            if Position.X < Left + Third then return "BottomLeft" end
+            if Position.X > Right - Third then return "BottomRight" end
+            return "Bottom"
+        elseif Position.X < (Left + Right) * 0.5 then
+            return "Left"
+        end
+        return "Right"
+    end
+
+    function Preview:StartElementDrag(Key, Element, Position)
+        self.DraggingElement = Key
+        self.DragElement = Element
+        self.DragOffset = Vector2.new(Position.X, Position.Y) - Element.AbsolutePosition
+        local Absolute = Element.AbsolutePosition - self.Overlay.AbsolutePosition
+        Element.Parent = self.Overlay
+        Element.AnchorPoint = Vector2.zero
+        Element.Position = UDim2.fromOffset(Absolute.X, Absolute.Y)
+        Element.ZIndex = 200
+    end
+
+    function Preview:MoveElement(Position)
+        if not self.DragElement then return end
+        local Local = Vector2.new(Position.X, Position.Y) - self.Overlay.AbsolutePosition - self.DragOffset
+        self.DragElement.Position = UDim2.fromOffset(Local.X, Local.Y)
+    end
+
+    function Preview:FinishElementDrag(Position)
+        local Key = self.DraggingElement
+        if not Key then return end
+        local Zone = self:GetNearestZone(Position)
+        local Entry = Controller.Table.Layout[Key]
+        if Entry then
+            Entry.Zone = Zone
+            Flags["esp_layout_" .. string.lower(Key) .. "_zone"] = Zone
+        end
+        self.DraggingElement = nil
+        self.DragElement = nil
+        self.DragOffset = nil
+        Controller:ApplyLayout(self.Data)
+    end
+
+    function Preview:Destroy()
+        for _, Connection in self.Connections do
+            if Connection and Connection.Connected then
+                Connection:Disconnect()
+            end
+        end
+        table.clear(self.Connections)
+        if self.Holder and self.Holder.Parent then
+            self.Holder:Destroy()
+        end
+    end
+
+    Preview:BuildCharacter()
+    table.insert(Preview.Connections, uis.InputBegan:Connect(function(Input)
+        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
+            or Input.UserInputType == Enum.UserInputType.Touch
+        if not Primary or not Preview:IsInsideOverlay(Input.Position) then return end
+        local Key, Element = Preview:GetLayoutElement(Input.Position)
+        if Key then
+            Preview:StartElementDrag(Key, Element, Input.Position)
+        else
+            Preview.DraggingModel = true
+            Preview.DragInput = Input
+            Preview.LastPointerX = Input.Position.X
+        end
+    end))
+    table.insert(Preview.Connections, uis.InputChanged:Connect(function(Input)
+        local Movement = Input.UserInputType == Enum.UserInputType.MouseMovement
+            or Input.UserInputType == Enum.UserInputType.Touch
+        if not Movement then return end
+        if Preview.DraggingElement then
+            Preview:MoveElement(Input.Position)
+        elseif Preview.DraggingModel then
+            Preview.Yaw += (Input.Position.X - Preview.LastPointerX) * 0.012
+            Preview.LastPointerX = Input.Position.X
+        end
+    end))
+    table.insert(Preview.Connections, uis.InputEnded:Connect(function(Input)
+        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
+            or Input.UserInputType == Enum.UserInputType.Touch
+        if not Primary then return end
+        if Preview.DraggingElement then
+            Preview:FinishElementDrag(Input.Position)
+        end
+        Preview.DraggingModel = false
+        Preview.DragInput = nil
+    end))
+    table.insert(Preview.Connections, Viewport:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        if Preview.Data.Size then Preview:FitCamera(Preview.Data.Size) end
+    end))
+    local PreviewUpdateElapsed = 0
+    local PreviewSignatureElapsed = 0
+    table.insert(Preview.Connections, run.RenderStepped:Connect(function(DeltaTime)
+        if not Preview:IsVisible() then
+            PreviewUpdateElapsed = 0
+            PreviewSignatureElapsed = 0
+            return
+        end
+        PreviewUpdateElapsed += DeltaTime
+        PreviewSignatureElapsed += DeltaTime
+        if PreviewSignatureElapsed >= 0.15 then
+            PreviewSignatureElapsed = 0
+            local Signature = Preview:GetFlagSignature()
+            if Preview.LastFlagSignature ~= Signature then
+                Preview.LastFlagSignature = Signature
+                Sync()
+            end
+        end
+        if PreviewUpdateElapsed >= 0.041666666666666664 then
+            local Step = PreviewUpdateElapsed
+            PreviewUpdateElapsed = 0
+            Preview:UpdateCharacter(Step)
+            Preview:Refresh()
+        end
+    end))
+    return Preview
+end
 
 return library
 end)()
