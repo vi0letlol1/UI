@@ -254,6 +254,14 @@ local library = (function()
         },
 
         title_gradients = {},
+        refreshers = {
+            accent = {},
+            title_gradient = {},
+        },
+        revision = {
+            accent = 0,
+            title_gradient = 0,
+        },
     }
 
     local keys = {
@@ -639,6 +647,33 @@ local library = (function()
             insert(theme_data[property], instance)
         end
 
+        function library:register_theme_refresher(theme, object, callback)
+            local refreshers = themes.refreshers[theme]
+            if not refreshers or type(callback) ~= "function" then
+                return
+            end
+            insert(refreshers, {object = object, callback = callback})
+        end
+
+        local function refresh_theme_state(theme, revision)
+            if themes.revision[theme] ~= revision then
+                return
+            end
+            local refreshers = themes.refreshers[theme]
+            if not refreshers then
+                return
+            end
+            for index = #refreshers, 1, -1 do
+                local entry = refreshers[index]
+                local object = entry and entry.object
+                if not object or not object.Parent then
+                    remove(refreshers, index)
+                else
+                    pcall(entry.callback, themes.preset[theme])
+                end
+            end
+        end
+
         local function make_title_gradient()
             local white = rgb(255, 255, 255)
 
@@ -668,30 +703,41 @@ local library = (function()
         end
 
         function library:update_theme(theme, new_color)
-            if theme == "title_gradient" then
-                themes.preset.title_gradient = new_color
-                refresh_title_gradients()
+            local old_color = themes.preset[theme]
+            if old_color == nil then
                 return
             end
 
-            local old_color = themes.preset[theme]
-            local theme_data = themes.utility[theme]
+            themes.preset[theme] = new_color
+            themes.revision[theme] = (themes.revision[theme] or 0) + 1
+            local revision = themes.revision[theme]
 
-            if theme_data then
-                for property_name, objects in theme_data do
-                    for index = #objects, 1, -1 do
-                        local object = objects[index]
-                        if not object or not object.Parent then
-                            remove(objects, index)
-                        elseif object[property_name] == old_color then
-                            object[property_name] = new_color
+            if theme == "title_gradient" then
+                refresh_title_gradients()
+            else
+                local theme_data = themes.utility[theme]
+                if theme_data then
+                    for property_name, objects in theme_data do
+                        for index = #objects, 1, -1 do
+                            local object = objects[index]
+                            if not object or not object.Parent then
+                                remove(objects, index)
+                            elseif object[property_name] == old_color then
+                                object[property_name] = new_color
+                            end
                         end
                     end
                 end
+                refresh_title_gradients()
             end
 
-            themes.preset[theme] = new_color
-            refresh_title_gradients()
+            refresh_theme_state(theme, revision)
+            task.defer(function()
+                refresh_theme_state(theme, revision)
+            end)
+            task.delay(0.28, function()
+                refresh_theme_state(theme, revision)
+            end)
         end
 
         function library:connection(signal, callback)
@@ -902,7 +948,7 @@ local library = (function()
                     update_responsive_scale(false)
                 end)
 
-                items[ "main" ]:GetPropertyChangedSignal("Size"):Connect(function()
+                library:connection(items[ "main" ]:GetPropertyChangedSignal("Size"), function()
                     task.defer(function()
                         update_responsive_scale(false)
                     end)
@@ -1037,26 +1083,30 @@ local library = (function()
                 end
 
                 local star_clock = 0
+                local star_elapsed = 0
                 library:connection(run.RenderStepped, function(delta_time)
-                    if not items[ "title_stars" ] or not items[ "title_stars" ].Parent then
+                    if not items[ "title_stars" ] or not items[ "title_stars" ].Parent or not library[ "items" ] or not library[ "items" ].Enabled then
+                        star_elapsed = 0
                         return
                     end
-
+                    star_elapsed += delta_time
+                    if star_elapsed < 1 / 30 then
+                        return
+                    end
+                    local step = star_elapsed
+                    star_elapsed = 0
                     local speed = clamp(tonumber(library.title_star_speed) or 1, 0.1, 5)
-                    star_clock = star_clock + (delta_time * speed)
+                    star_clock = star_clock + (step * speed)
 
                     for index, star_state in title_stars do
                         local star = star_state.object
                         if star and star.Parent then
                             local pulse = (sin((star_clock * 2.2) + star_state.phase) + 1) * 0.5
                             pulse = pulse * pulse
-
                             local pixel_size = star_state.max_size * pulse
                             star.Size = dim2(0, pixel_size, 0, pixel_size)
                             star.ImageTransparency = 1 - pulse
-
-                            star_state.rotation = star_state.rotation
-                                + (delta_time * speed * (28 + index * 7) * star_state.direction)
+                            star_state.rotation = star_state.rotation + (step * speed * (28 + index * 7) * star_state.direction)
                             star.Rotation = star_state.rotation
                         end
                     end
@@ -1849,12 +1899,23 @@ local library = (function()
                     cfg.toggle_section(cfg.default)
                 end)
 
-                function cfg.toggle_section(bool)
-                    library:tween(items[ "toggle" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(58, 58, 62)}, Enum.EasingStyle.Quad)
-                    library:tween(items[ "toggle_outline" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(50, 50, 50)}, Enum.EasingStyle.Quad)
-                    library:tween(items[ "toggle_circle" ], {BackgroundColor3 = bool and rgb(255, 255, 255) or rgb(86, 86, 88), Position = bool and dim2(1, -14, 0, 2) or dim2(0, 2, 0, 2)}, Enum.EasingStyle.Quad)
-                    library:tween(items[ "fade" ], {BackgroundTransparency = bool and 1 or 0.8}, Enum.EasingStyle.Quad)
+                function cfg.refresh_theme()
+                    if not items[ "toggle" ] or not items[ "toggle" ].Parent then
+                        return
+                    end
+                    items[ "toggle" ].BackgroundColor3 = cfg.default and themes.preset.accent or rgb(58, 58, 62)
+                    items[ "toggle_outline" ].BackgroundColor3 = cfg.default and themes.preset.accent or rgb(50, 50, 50)
                 end
+
+                function cfg.toggle_section(bool)
+                    cfg.default = bool == true
+                    library:tween(items[ "toggle" ], {BackgroundColor3 = cfg.default and themes.preset.accent or rgb(58, 58, 62)}, Enum.EasingStyle.Quad)
+                    library:tween(items[ "toggle_outline" ], {BackgroundColor3 = cfg.default and themes.preset.accent or rgb(50, 50, 50)}, Enum.EasingStyle.Quad)
+                    library:tween(items[ "toggle_circle" ], {BackgroundColor3 = cfg.default and rgb(255, 255, 255) or rgb(86, 86, 88), Position = cfg.default and dim2(1, -14, 0, 2) or dim2(0, 2, 0, 2)}, Enum.EasingStyle.Quad)
+                    library:tween(items[ "fade" ], {BackgroundTransparency = cfg.default and 1 or 0.8}, Enum.EasingStyle.Quad)
+                end
+
+                library:register_theme_refresher("accent", items[ "toggle" ], cfg.refresh_theme)
             end
 
             return setmetatable(cfg, library)
@@ -2057,6 +2118,19 @@ local library = (function()
                 }, Enum.EasingStyle.Quad)
 
                 cfg.callback(bool)
+            end
+
+            function cfg.refresh_theme()
+                if not items[ "toggle_button" ] or not items[ "toggle_button" ].Parent then
+                    return
+                end
+                local active_color = cfg.risky and cfg.risky_color or themes.preset.accent
+                items[ "toggle_button" ].BackgroundColor3 = cfg.enabled and active_color or rgb(58, 58, 62)
+                items[ "inline" ].BackgroundColor3 = cfg.enabled and active_color or rgb(50, 50, 50)
+            end
+
+            if not cfg.risky then
+                library:register_theme_refresher("accent", items[ "toggle_button" ], cfg.refresh_theme)
             end
 
             local function toggle_state()
@@ -4869,12 +4943,13 @@ function library:esp_preview(options)
     if type(Controller) ~= "table" or type(Controller.InitEsp) ~= "function" then
         return nil
     end
+
     local Holder = Instance.new("Frame")
     Holder.Name = "\0"
     Holder.Active = true
     Holder.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
     Holder.BorderSizePixel = 0
-    Holder.Size = UDim2.new(1, 0, 0, 310)
+    Holder.Size = UDim2.new(1, 0, 0, 320)
     Holder.Parent = options.parent or (self.items and self.items.elements)
 
     local Corner = Instance.new("UICorner")
@@ -4894,8 +4969,8 @@ function library:esp_preview(options)
     Viewport.BorderSizePixel = 0
     Viewport.LightColor = Color3.new(1, 1, 1)
     Viewport.LightDirection = Vector3.new(-1, -1, -1)
-    Viewport.Position = UDim2.fromOffset(12, 12)
-    Viewport.Size = UDim2.new(1, -24, 1, -24)
+    Viewport.Position = UDim2.fromOffset(14, 14)
+    Viewport.Size = UDim2.new(1, -28, 1, -28)
     Viewport.Parent = Holder
 
     local World = Instance.new("WorldModel")
@@ -4941,11 +5016,22 @@ function library:esp_preview(options)
         Yaw = math.rad(180),
         DraggingModel = false,
         DraggingElement = nil,
+        Destroyed = false,
+        StyleDirty = true,
+        GeometryDirty = true,
     }
+
+    local function Track(Signal, Callback)
+        local Connection = library:connection(Signal, Callback)
+        table.insert(Preview.Connections, Connection)
+        return Connection
+    end
 
     function Preview:FitCamera(Size)
         local ViewportSize = self.Viewport.AbsoluteSize
-        if ViewportSize.X <= 1 or ViewportSize.Y <= 1 then return end
+        if ViewportSize.X <= 1 or ViewportSize.Y <= 1 then
+            return
+        end
         local VerticalFov = math.rad(self.Camera.FieldOfView)
         local Aspect = ViewportSize.X / math.max(ViewportSize.Y, 1)
         local HorizontalFov = 2 * math.atan(math.tan(VerticalFov * 0.5) * Aspect)
@@ -4954,32 +5040,53 @@ function library:esp_preview(options)
         local HalfDepth = math.max(Size.X, Size.Z) * 0.5
         local VerticalDistance = HalfHeight / math.tan(VerticalFov * 0.5)
         local HorizontalDistance = HalfWidth / math.tan(HorizontalFov * 0.5)
-        local Distance = (math.max(VerticalDistance, HorizontalDistance) + HalfDepth) * 1.22
+        local Distance = (math.max(VerticalDistance, HorizontalDistance) + HalfDepth) * 1.28
         self.Camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -Distance), Vector3.zero)
         self.CameraReady = true
+        self.GeometryDirty = true
     end
 
-    function Preview:BuildCharacter()
-        self.World:ClearAllChildren()
-        table.clear(self.Data.Parts)
-
+    function Preview:CreateFallbackModel()
         local Model = Instance.new("Model")
-        Model.Name = "BowserPreviewModel"
+        Model.Name = "HerobrinePreviewModel"
+        local Part = Instance.new("Part")
+        Part.Name = "Herobrine"
+        Part.Size = Vector3.new(5, 7, 3)
+        Part.Anchored = true
+        Part.CanCollide = false
+        Part.CanTouch = false
+        Part.CanQuery = false
+        Part.CastShadow = false
+        Part.Color = Color3.fromRGB(70, 120, 85)
+        Part.Parent = Model
+        return Model
+    end
 
+    function Preview:LoadModel()
         local Success, Loaded = pcall(function()
-            return game:GetObjects("rbxassetid://430331589")
+            return game:GetObjects("rbxassetid://7331303605")
         end)
         local Asset = Success and type(Loaded) == "table" and Loaded[1] or nil
+        local Model = Instance.new("Model")
+        Model.Name = "HerobrinePreviewModel"
 
         if Asset then
             if Asset:IsA("Model") then
                 Model:Destroy()
                 Model = Asset
-                Model.Name = "BowserPreviewModel"
+                Model.Name = "HerobrinePreviewModel"
+            elseif Asset:IsA("BasePart") then
+                Asset.Parent = Model
+            elseif Asset:IsA("Accessory") then
+                local Handle = Asset:FindFirstChild("Handle")
+                if Handle and Handle:IsA("BasePart") then
+                    Handle.Parent = Model
+                end
+                Asset:Destroy()
             elseif Asset:IsA("DataModelMesh") then
                 local Part = Instance.new("Part")
-                Part.Name = "Bowser"
-                Part.Size = Vector3.new(6, 6, 6)
+                Part.Name = "Herobrine"
+                Part.Size = Vector3.new(5, 7, 3)
                 Part.Anchored = true
                 Part.CanCollide = false
                 Asset.Parent = Part
@@ -4989,11 +5096,6 @@ function library:esp_preview(options)
                     Asset.Parent = Model
                 end)
                 if not ParentSuccess then
-                    for _, Descendant in Asset:GetDescendants() do
-                        if Descendant:IsA("BasePart") then
-                            Descendant:Clone().Parent = Model
-                        end
-                    end
                     Asset:Destroy()
                 end
             end
@@ -5001,7 +5103,7 @@ function library:esp_preview(options)
 
         local Parts = {}
         local function Prepare(Object)
-            if Object:IsA("Script") or Object:IsA("LocalScript") or Object:IsA("ModuleScript") then
+            if Object:IsA("Script") or Object:IsA("LocalScript") or Object:IsA("ModuleScript") or Object:IsA("Humanoid") or Object:IsA("Animator") or Object:IsA("AnimationController") or Object:IsA("Sound") then
                 Object:Destroy()
             elseif Object:IsA("ParticleEmitter") or Object:IsA("Trail") or Object:IsA("Beam") or Object:IsA("Smoke") or Object:IsA("Fire") or Object:IsA("Sparkles") then
                 Object.Enabled = false
@@ -5011,73 +5113,69 @@ function library:esp_preview(options)
                 Object.CanTouch = false
                 Object.CanQuery = false
                 Object.CastShadow = false
+                Object.Massless = true
                 table.insert(Parts, Object)
             end
         end
 
         Prepare(Model)
-        for _, Descendant in Model:GetDescendants() do
-            Prepare(Descendant)
+        local Descendants = Model:GetDescendants()
+        for Index = #Descendants, 1, -1 do
+            local Object = Descendants[Index]
+            if Object and Object.Parent then
+                Prepare(Object)
+            end
         end
 
         if #Parts == 0 then
-            Model:ClearAllChildren()
-            local Part = Instance.new("Part")
-            Part.Name = "Bowser"
-            Part.Size = Vector3.new(6, 6, 6)
-            Part.Anchored = true
-            Part.CanCollide = false
-            Part.CanTouch = false
-            Part.CanQuery = false
-            Part.CastShadow = false
-            Part.Transparency = 1
-            Part.Parent = Model
-            local Mesh = Instance.new("SpecialMesh")
-            Mesh.MeshType = Enum.MeshType.FileMesh
-            Mesh.MeshId = "rbxassetid://430331589"
-            Mesh.Parent = Part
-            table.insert(Parts, Part)
+            Model:Destroy()
+            Model = self:CreateFallbackModel()
+            Parts = {}
+            for _, Object in Model:GetDescendants() do
+                if Object:IsA("BasePart") then
+                    table.insert(Parts, Object)
+                end
+            end
         end
 
-        Model.Parent = self.World
+        return Model, Parts
+    end
 
-        local function CalculateBounds(VisibleOnly)
-            local Minimum = Vector3.new(math.huge, math.huge, math.huge)
-            local Maximum = Vector3.new(-math.huge, -math.huge, -math.huge)
-            local Found = false
-            for _, Part in Parts do
-                if Part and Part.Parent and (not VisibleOnly or (Part.Transparency < 1 and Part.Name ~= "HumanoidRootPart")) then
-                    local Half = Part.Size * 0.5
-                    for X = -1, 1, 2 do
-                        for Y = -1, 1, 2 do
-                            for Z = -1, 1, 2 do
-                                local Point = Part.CFrame:PointToWorldSpace(Vector3.new(Half.X * X, Half.Y * Y, Half.Z * Z))
-                                Minimum = Vector3.new(
-                                    math.min(Minimum.X, Point.X),
-                                    math.min(Minimum.Y, Point.Y),
-                                    math.min(Minimum.Z, Point.Z)
-                                )
-                                Maximum = Vector3.new(
-                                    math.max(Maximum.X, Point.X),
-                                    math.max(Maximum.Y, Point.Y),
-                                    math.max(Maximum.Z, Point.Z)
-                                )
-                                Found = true
-                            end
+    function Preview:CalculateBounds(Parts, VisibleOnly)
+        local Minimum = Vector3.new(math.huge, math.huge, math.huge)
+        local Maximum = Vector3.new(-math.huge, -math.huge, -math.huge)
+        local Found = false
+        for _, Part in Parts do
+            if Part and Part.Parent and (not VisibleOnly or (Part.Transparency < 1 and Part.Name ~= "HumanoidRootPart")) then
+                local Half = Part.Size * 0.5
+                for X = -1, 1, 2 do
+                    for Y = -1, 1, 2 do
+                        for Z = -1, 1, 2 do
+                            local Point = Part.CFrame:PointToWorldSpace(Vector3.new(Half.X * X, Half.Y * Y, Half.Z * Z))
+                            Minimum = Vector3.new(math.min(Minimum.X, Point.X), math.min(Minimum.Y, Point.Y), math.min(Minimum.Z, Point.Z))
+                            Maximum = Vector3.new(math.max(Maximum.X, Point.X), math.max(Maximum.Y, Point.Y), math.max(Maximum.Z, Point.Z))
+                            Found = true
                         end
                     end
                 end
             end
-            if not Found then return nil end
-            return (Minimum + Maximum) * 0.5, Maximum - Minimum
         end
+        if not Found then
+            return nil
+        end
+        return (Minimum + Maximum) * 0.5, Maximum - Minimum
+    end
 
-        local Center, CenteredSize = CalculateBounds(true)
+    function Preview:BuildCharacter()
+        self.World:ClearAllChildren()
+        table.clear(self.Data.Parts)
+        local Model, Parts = self:LoadModel()
+        local Center, CenteredSize = self:CalculateBounds(Parts, true)
         if not Center then
-            Center, CenteredSize = CalculateBounds(false)
+            Center, CenteredSize = self:CalculateBounds(Parts, false)
         end
         Center = Center or Vector3.zero
-        CenteredSize = CenteredSize or Vector3.new(6, 6, 6)
+        CenteredSize = CenteredSize or Vector3.new(5, 7, 3)
 
         local Shift = CFrame.new(-Center)
         for _, Part in Parts do
@@ -5086,18 +5184,24 @@ function library:esp_preview(options)
             end
         end
 
+        local RotationRoot = Instance.new("Model")
+        RotationRoot.Name = "HerobrinePreviewRoot"
+        Model.Parent = RotationRoot
+        RotationRoot.Parent = self.World
+
         for _, Part in Parts do
             if Part and Part.Parent then
-                table.insert(self.Data.Parts, {Part = Part, Relative = Part.CFrame})
+                table.insert(self.Data.Parts, Part)
             end
         end
 
-        self.Data.Clone = Model
+        self.Data.Clone = RotationRoot
+        self.Data.Model = Model
         self.Data.Size = CenteredSize
         self.CameraReady = false
         self:FitCamera(CenteredSize)
         task.defer(function()
-            if self.Data.Size then
+            if not self.Destroyed and self.Data.Size then
                 self:FitCamera(self.Data.Size)
             end
         end)
@@ -5105,16 +5209,17 @@ function library:esp_preview(options)
 
     function Preview:GetBounds()
         local Size = self.Viewport.AbsoluteSize
-        if Size.X <= 1 or Size.Y <= 1 then return end
+        if Size.X <= 1 or Size.Y <= 1 then
+            return
+        end
         local FocalLength = Size.Y / (2 * math.tan(math.rad(self.Camera.FieldOfView) * 0.5))
         local CameraCFrame = self.Camera.CFrame
         local MinimumX, MinimumY = math.huge, math.huge
         local MaximumX, MaximumY = -math.huge, -math.huge
         local Found = false
 
-        for _, Mapping in self.Data.Parts do
-            local Part = Mapping.Part
-            if Part.Parent and Part.Transparency < 1 and Part.Name ~= "HumanoidRootPart" then
+        for _, Part in self.Data.Parts do
+            if Part and Part.Parent and Part.Transparency < 1 and Part.Name ~= "HumanoidRootPart" then
                 local Center = CameraCFrame:PointToObjectSpace(Part.Position)
                 local Depth = -Center.Z
                 if Depth > 0.01 then
@@ -5127,21 +5232,30 @@ function library:esp_preview(options)
                     local ExtendY = (math.abs(Right.Y * Half.X) + math.abs(Up.Y * Half.Y) + math.abs(Look.Y * Half.Z)) * Scale
                     local X = Size.X * 0.5 + Center.X * Scale
                     local Y = Size.Y * 0.5 - Center.Y * Scale
-                    MinimumX, MaximumX = math.min(MinimumX, X - ExtendX), math.max(MaximumX, X + ExtendX)
-                    MinimumY, MaximumY = math.min(MinimumY, Y - ExtendY), math.max(MaximumY, Y + ExtendY)
+                    MinimumX = math.min(MinimumX, X - ExtendX)
+                    MaximumX = math.max(MaximumX, X + ExtendX)
+                    MinimumY = math.min(MinimumY, Y - ExtendY)
+                    MaximumY = math.max(MaximumY, Y + ExtendY)
                     Found = true
                 end
             end
         end
-        if not Found then return end
+        if not Found then
+            return
+        end
         local Bounding = Controller.Table.Boxes["Bounding Box"]
-        local PaddingX, PaddingY = Bounding.BoxX or 0, Bounding.BoxY or 0
-        return math.floor(MinimumX - PaddingX * 0.5), math.floor(MinimumY - PaddingY * 0.5),
-            math.max(1, math.floor(MaximumX - MinimumX + PaddingX)),
-            math.max(1, math.floor(MaximumY - MinimumY + PaddingY))
+        local PaddingX = Bounding.BoxX or 0
+        local PaddingY = Bounding.BoxY or 0
+        return math.floor(MinimumX - PaddingX * 0.5), math.floor(MinimumY - PaddingY * 0.5), math.max(1, math.floor(MaximumX - MinimumX + PaddingX)), math.max(1, math.floor(MaximumY - MinimumY + PaddingY))
     end
 
-    function Preview:Refresh()
+    function Preview:SetGeometry(Object, Property, Value)
+        if Object and Object.Parent and Object[Property] ~= Value then
+            Object[Property] = Value
+        end
+    end
+
+    function Preview:RefreshGeometry()
         local Objects = self.Data.Objects
         local Config = Controller.Table
         if not self.CameraReady and self.Data.Size then
@@ -5154,13 +5268,28 @@ function library:esp_preview(options)
         end
 
         Objects.TargetHolder.Visible = true
-        Objects.TargetHolder.Position = UDim2.fromOffset(X, Y)
-        Objects.TargetHolder.Size = UDim2.fromOffset(Width, Height)
-        Objects.BoxGlow.Size = UDim2.fromOffset(Width, Height)
-        Objects.BoxOutlineHolder.Size = UDim2.fromOffset(Width, Height)
-        Objects.BoxInlineHolder.Size = UDim2.fromOffset(Width + 2, Height + 2)
-        Objects.BoxFill.Size = UDim2.fromOffset(Width, Height)
+        self:SetGeometry(Objects.TargetHolder, "Position", UDim2.fromOffset(X, Y))
+        self:SetGeometry(Objects.TargetHolder, "Size", UDim2.fromOffset(Width, Height))
+        self:SetGeometry(Objects.BoxGlow, "Size", UDim2.fromOffset(Width, Height))
+        self:SetGeometry(Objects.BoxOutlineHolder, "Size", UDim2.fromOffset(Width, Height))
+        self:SetGeometry(Objects.BoxInlineHolder, "Size", UDim2.fromOffset(Width + 2, Height + 2))
+        self:SetGeometry(Objects.BoxFill, "Size", UDim2.fromOffset(Width, Height))
 
+        local SizeChanged = self.LastWidth ~= Width or self.LastHeight ~= Height
+        self.LastWidth = Width
+        self.LastHeight = Height
+        local Health = Config.Bars["Health Bar"]
+        if Health.Enabled and SizeChanged then
+            Controller:UpdateBarLayout(self.Data, "HealthBar", 1, Width, Height)
+        end
+        if SizeChanged and not self.DraggingElement and self.StyleDirty ~= true then
+            Controller:ApplyLayout(self.Data)
+        end
+    end
+
+    function Preview:RefreshStyle()
+        local Objects = self.Data.Objects
+        local Config = Controller.Table
         local Boxes = Config.Boxes
         local Glow = Boxes["Box Glow"]
         Objects.BoxGlow.ImageTransparency = Boxes.Enabled and Glow.Enabled and 0 or 1
@@ -5174,35 +5303,27 @@ function library:esp_preview(options)
         Objects.BoxFillGradient.Transparency = NumberSequence.new(Boxes.Filled.Transparency[1], Boxes.Filled.Transparency[2])
 
         local Health = Config.Bars["Health Bar"]
-        local Humanoid = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-        local HealthValue = Humanoid and Humanoid.Health or 100
-        local MaxHealth = Humanoid and Humanoid.MaxHealth or 100
-        local HealthRatio = math.clamp(HealthValue / math.max(MaxHealth, 1), 0, 1)
         Objects.HealthBarOutline.Visible = Health.Enabled
-        if Health.Enabled then
-            Controller:UpdateBarLayout(self.Data, "HealthBar", HealthRatio, Width, Height)
-            Objects.HealthBarGradient.Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Health.Top),
-                ColorSequenceKeypoint.new(0.5, Health.Mid),
-                ColorSequenceKeypoint.new(1, Health.Bot),
-            })
-            Objects.HealthBarText.Visible = HealthRatio < 1
-            Objects.HealthBarText.Text = tostring(math.floor(HealthValue))
-        end
+        Objects.HealthBarGradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Health.Top),
+            ColorSequenceKeypoint.new(0.5, Health.Mid),
+            ColorSequenceKeypoint.new(1, Health.Bot),
+        })
+        Objects.HealthBarText.Visible = false
+        Objects.HealthBarText.Text = "100"
         Objects.ArmorBarOutline.Visible = false
 
         local Texts = Config.Texts
-        local Tool = lp.Character and lp.Character:FindFirstChildOfClass("Tool")
         Objects.NameRow.Visible = Texts.Name.Enabled
         Objects.TargetName.Visible = Texts.Name.Enabled
-        Objects.TargetName.Text = "bowser"
+        Objects.TargetName.Text = "Herobrine"
         Objects.TargetNameGradient.Color = ColorSequence.new(Texts.Name.Top, Texts.Name.Bot)
         Objects.PlayerIcon.Visible = false
         Objects.Distance.Visible = Texts.Distance.Enabled
         Objects.Distance.Text = "76st"
         Objects.DistanceGradient.Color = ColorSequence.new(Texts.Distance.Top, Texts.Distance.Bot)
         Objects.Weapon.Visible = Texts.Weapon.Enabled
-        Objects.Weapon.Text = Tool and Tool.Name or "none"
+        Objects.Weapon.Text = "none"
         Objects.WeaponGradient.Color = ColorSequence.new(Texts.Weapon.Top, Texts.Weapon.Bot)
         Objects.WeaponImage.Visible = false
         Objects.FlagsRow.Visible = Texts.Flags.Enabled
@@ -5214,34 +5335,41 @@ function library:esp_preview(options)
         Objects.WalkFlagGradient.Color = FlagColors
         Objects.JumpFlagGradient.Color = FlagColors
 
-        local Highlight = self.Data.Clone and self.Data.Clone:FindFirstChild("ESPPreviewChams")
+        local Highlight = self.Highlight
         if Config.Chams.Enabled and self.Data.Clone then
-            Highlight = Highlight or Instance.new("Highlight")
-            Highlight.Name = "ESPPreviewChams"
-            Highlight.Parent = self.Data.Clone
+            if not Highlight or not Highlight.Parent then
+                Highlight = Instance.new("Highlight")
+                Highlight.Name = "ESPPreviewChams"
+                Highlight.Parent = self.Data.Clone
+                self.Highlight = Highlight
+            end
             Highlight.FillColor = Config.Chams.FillColor
             Highlight.OutlineColor = Config.Chams.GlowColor
             Highlight.FillTransparency = Config.Chams.FillTransparency
             Highlight.OutlineTransparency = 0
         elseif Highlight then
             Highlight:Destroy()
+            self.Highlight = nil
         end
 
         if not self.DraggingElement then
             Controller:ApplyLayout(self.Data)
         end
+        self.StyleDirty = false
+        self.GeometryDirty = true
     end
 
     function Preview:UpdateCharacter(DeltaTime)
+        if not self.Data.Clone or not self.Data.Clone.Parent then
+            return
+        end
         if not self.DraggingModel and not self.DraggingElement then
-            self.Yaw += DeltaTime * 0.72
+            self.Yaw += DeltaTime * 0.62
         end
-        local Rotation = CFrame.Angles(0, self.Yaw, 0)
-        for _, Mapping in self.Data.Parts do
-            if Mapping.Part and Mapping.Part.Parent then
-                Mapping.Part.CFrame = Rotation * Mapping.Relative
-            end
-        end
+        pcall(function()
+            self.Data.Clone:PivotTo(CFrame.Angles(0, self.Yaw, 0))
+        end)
+        self.GeometryDirty = true
     end
 
     function Preview:GetElementBounds(Element)
@@ -5249,10 +5377,14 @@ function library:esp_preview(options)
         local MaximumX, MaximumY = -math.huge, -math.huge
         local Found = false
         local function Include(Object)
-            if not Object:IsA("GuiObject") or not Object.Visible then return end
+            if not Object:IsA("GuiObject") or not Object.Visible then
+                return
+            end
             local Position = Object.AbsolutePosition
             local Size = Object.AbsoluteSize
-            if Size.X <= 0 or Size.Y <= 0 then return end
+            if Size.X <= 0 or Size.Y <= 0 then
+                return
+            end
             MinimumX = math.min(MinimumX, Position.X)
             MinimumY = math.min(MinimumY, Position.Y)
             MaximumX = math.max(MaximumX, Position.X + Size.X)
@@ -5263,7 +5395,9 @@ function library:esp_preview(options)
         for _, Descendant in Element:GetDescendants() do
             Include(Descendant)
         end
-        if not Found then return end
+        if not Found then
+            return
+        end
         return MinimumX, MinimumY, MaximumX, MaximumY
     end
 
@@ -5274,7 +5408,7 @@ function library:esp_preview(options)
             if Element and Element.Visible then
                 local Left, Top, Right, Bottom = self:GetElementBounds(Element)
                 if Left then
-                    local Margin = Controller:IsBarKey(Key) and 13 or 7
+                    local Margin = Controller:IsBarKey(Key) and 14 or 8
                     Left -= Margin
                     Top -= Margin
                     Right += Margin
@@ -5296,17 +5430,18 @@ function library:esp_preview(options)
     function Preview:IsInsideOverlay(Position)
         local ObjectPosition = self.Overlay.AbsolutePosition
         local ObjectSize = self.Overlay.AbsoluteSize
-        return Position.X >= ObjectPosition.X
-            and Position.X <= ObjectPosition.X + ObjectSize.X
-            and Position.Y >= ObjectPosition.Y
-            and Position.Y <= ObjectPosition.Y + ObjectSize.Y
+        return Position.X >= ObjectPosition.X and Position.X <= ObjectPosition.X + ObjectSize.X and Position.Y >= ObjectPosition.Y and Position.Y <= ObjectPosition.Y + ObjectSize.Y
     end
 
     function Preview:IsVisible()
         local Current = self.Holder
         while Current do
-            if Current:IsA("GuiObject") and Current.Visible == false then return false end
-            if Current:IsA("LayerCollector") and Current.Enabled == false then return false end
+            if Current:IsA("GuiObject") and Current.Visible == false then
+                return false
+            end
+            if Current:IsA("LayerCollector") and Current.Enabled == false then
+                return false
+            end
             Current = Current.Parent
         end
         return self.Holder.Parent ~= nil and self.Viewport.AbsoluteSize.X > 1 and self.Viewport.AbsoluteSize.Y > 1
@@ -5318,11 +5453,7 @@ function library:esp_preview(options)
             if string.sub(tostring(Key), 1, 4) == "esp_" then
                 local Text
                 if type(Value) == "table" then
-                    Text = tostring(Value.Color or Value.color or "")
-                        .. ":" .. tostring(Value.Transparency or Value.transparency or "")
-                        .. ":" .. tostring(Value.mode or "")
-                        .. ":" .. tostring(Value.key or "")
-                        .. ":" .. tostring(Value.active or "")
+                    Text = tostring(Value.Color or Value.color or "") .. ":" .. tostring(Value.Transparency or Value.transparency or "") .. ":" .. tostring(Value.mode or "") .. ":" .. tostring(Value.key or "") .. ":" .. tostring(Value.active or "")
                 else
                     Text = tostring(Value)
                 end
@@ -5340,7 +5471,6 @@ function library:esp_preview(options)
         local Right = Left + Target.AbsoluteSize.X
         local Bottom = Top + Target.AbsoluteSize.Y
         local Third = Target.AbsoluteSize.X / 3
-
         if Position.Y < Top then
             if Position.X < Left + Third then return "TopLeft" end
             if Position.X > Right - Third then return "TopRight" end
@@ -5368,11 +5498,13 @@ function library:esp_preview(options)
     end
 
     function Preview:MoveElement(Position)
-        if not self.DragElement then return end
+        if not self.DragElement then
+            return
+        end
         local Local = Vector2.new(Position.X, Position.Y) - self.Overlay.AbsolutePosition - self.DragOffset
         local OverlaySize = self.Overlay.AbsoluteSize
         local ElementSize = self.DragElement.AbsoluteSize
-        local Padding = 10
+        local Padding = 12
         local X = math.clamp(Local.X, -Padding, OverlaySize.X - ElementSize.X + Padding)
         local Y = math.clamp(Local.Y, -Padding, OverlaySize.Y - ElementSize.Y + Padding)
         self.DragElement.Position = UDim2.fromOffset(X, Y)
@@ -5380,7 +5512,9 @@ function library:esp_preview(options)
 
     function Preview:FinishElementDrag(Position)
         local Key = self.DraggingElement
-        if not Key then return end
+        if not Key then
+            return
+        end
         local Zone = self:GetNearestZone(Position)
         local Entry = Controller.Table.Layout[Key]
         if Entry then
@@ -5398,22 +5532,39 @@ function library:esp_preview(options)
     end
 
     function Preview:Destroy()
+        if self.Destroyed then
+            return
+        end
+        self.Destroyed = true
         for _, Connection in self.Connections do
             if Connection and Connection.Connected then
                 Connection:Disconnect()
             end
         end
         table.clear(self.Connections)
+        if self.Highlight and self.Highlight.Parent then
+            self.Highlight:Destroy()
+        end
+        if self.World and self.World.Parent then
+            self.World:ClearAllChildren()
+        end
         if self.Holder and self.Holder.Parent then
             self.Holder:Destroy()
         end
     end
 
     Preview:BuildCharacter()
-    table.insert(Preview.Connections, uis.InputBegan:Connect(function(Input)
-        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
-            or Input.UserInputType == Enum.UserInputType.Touch
-        if not Primary then return end
+    pcall(Sync)
+    Preview.StyleDirty = true
+
+    Track(uis.InputBegan, function(Input)
+        if Preview.Destroyed or not Preview:IsVisible() then
+            return
+        end
+        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch
+        if not Primary then
+            return
+        end
         local Key, Element = Preview:GetLayoutElement(Input.Position)
         if Key then
             Preview.DragInput = Input
@@ -5423,58 +5574,97 @@ function library:esp_preview(options)
             Preview.DragInput = Input
             Preview.LastPointerX = Input.Position.X
         end
-    end))
-    table.insert(Preview.Connections, uis.InputChanged:Connect(function(Input)
-        local Movement = Input.UserInputType == Enum.UserInputType.MouseMovement
-            or Input.UserInputType == Enum.UserInputType.Touch
-        if not Movement then return end
-        if Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch and Input ~= Preview.DragInput then return end
+    end)
+
+    Track(uis.InputChanged, function(Input)
+        if Preview.Destroyed then
+            return
+        end
+        local Movement = Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch
+        if not Movement then
+            return
+        end
+        if Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch and Input ~= Preview.DragInput then
+            return
+        end
         if Preview.DraggingElement then
             Preview:MoveElement(Input.Position)
         elseif Preview.DraggingModel then
             Preview.Yaw += (Input.Position.X - Preview.LastPointerX) * 0.012
             Preview.LastPointerX = Input.Position.X
+            Preview.GeometryDirty = true
         end
-    end))
-    table.insert(Preview.Connections, uis.InputEnded:Connect(function(Input)
-        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1
-            or Input.UserInputType == Enum.UserInputType.Touch
-        if not Primary then return end
-        if Preview.DragInput and Input ~= Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch then return end
+    end)
+
+    Track(uis.InputEnded, function(Input)
+        if Preview.Destroyed then
+            return
+        end
+        local Primary = Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch
+        if not Primary then
+            return
+        end
+        if Preview.DragInput and Input ~= Preview.DragInput and Preview.DragInput.UserInputType == Enum.UserInputType.Touch then
+            return
+        end
         if Preview.DraggingElement then
             Preview:FinishElementDrag(Input.Position)
         end
         Preview.DraggingModel = false
         Preview.DragInput = nil
-    end))
-    table.insert(Preview.Connections, Viewport:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        if Preview.Data.Size then Preview:FitCamera(Preview.Data.Size) end
-    end))
+    end)
+
+    Track(Viewport:GetPropertyChangedSignal("AbsoluteSize"), function()
+        if Preview.Data.Size then
+            Preview:FitCamera(Preview.Data.Size)
+        end
+    end)
+
+    Track(Holder.AncestryChanged, function(_, Parent)
+        if not Parent and not Preview.Destroyed then
+            Preview:Destroy()
+        end
+    end)
+
     local PreviewUpdateElapsed = 0
     local PreviewSignatureElapsed = 0
-    table.insert(Preview.Connections, run.RenderStepped:Connect(function(DeltaTime)
+    Track(run.RenderStepped, function(DeltaTime)
+        if Preview.Destroyed then
+            return
+        end
         if not Preview:IsVisible() then
             PreviewUpdateElapsed = 0
             PreviewSignatureElapsed = 0
             return
         end
+
         PreviewUpdateElapsed += DeltaTime
         PreviewSignatureElapsed += DeltaTime
-        if PreviewSignatureElapsed >= 0.15 then
+
+        if PreviewSignatureElapsed >= 0.25 then
             PreviewSignatureElapsed = 0
             local Signature = Preview:GetFlagSignature()
             if Preview.LastFlagSignature ~= Signature then
                 Preview.LastFlagSignature = Signature
-                Sync()
+                pcall(Sync)
+                Preview.StyleDirty = true
             end
         end
-        if PreviewUpdateElapsed >= 0.041666666666666664 then
+
+        if PreviewUpdateElapsed >= 1 / 15 then
             local Step = PreviewUpdateElapsed
             PreviewUpdateElapsed = 0
             Preview:UpdateCharacter(Step)
-            Preview:Refresh()
+            if Preview.StyleDirty then
+                Preview:RefreshStyle()
+            end
+            if Preview.GeometryDirty then
+                Preview.GeometryDirty = false
+                Preview:RefreshGeometry()
+            end
         end
-    end))
+    end)
+
     return Preview
 end
 
