@@ -1211,13 +1211,36 @@ local library = (function()
                     BackgroundColor3 = rgb(255, 255, 255)
                 });
 
+                local _keyTimeText = ""
+                do
+                    local _ok, _tl = pcall(function() return LP_TIMELEFT end)
+                    if _ok and type(_tl) == "number" and _tl > 0 then
+                        local _days = math.floor(_tl / 86400)
+                        local _hours = math.floor((_tl % 86400) / 3600)
+                        if _days > 0 then
+                            _keyTimeText = tostring(_days) .. (_days == 1 and " day" or " days") .. " left"
+                        elseif _hours > 0 then
+                            _keyTimeText = tostring(_hours) .. (_hours == 1 and " hour" or " hours") .. " left"
+                        else
+                            local _mins = math.max(1, math.floor(_tl / 60))
+                            _keyTimeText = tostring(_mins) .. (_mins == 1 and " minute" or " minutes") .. " left"
+                        end
+                    elseif _ok and type(_tl) == "number" and _tl == 0 then
+                        _keyTimeText = "lifetime"
+                    else
+                        _keyTimeText = ""
+                    end
+                end
+
+                local _displaySuffix = _keyTimeText ~= "" and ('<font color="rgb(72, 72, 73)">' .. _keyTimeText .. ', </font>' .. cfg.name .. cfg.suffix) or (cfg.name .. cfg.suffix)
+
                 items[ "other_info" ] = library:create( "TextLabel" , {
                     Parent = items[ "info" ];
                     RichText = true;
                     Name = "\0";
                     TextColor3 = themes.preset.accent;
                     BorderColor3 = rgb(0, 0, 0);
-                    Text = '<font color="rgb(72, 72, 73)">32 days left, </font>' .. cfg.name .. cfg.suffix;
+                    Text = _displaySuffix;
                     Size = dim2(1, 0, 0, 0);
                     Position = dim2(0, -10, 0.5, -1);
                     AnchorPoint = vec2(0, 0.5);
